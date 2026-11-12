@@ -1,7 +1,39 @@
 import { useEffect, useState } from "react";
 import "./index.css";
+import { ApiError, getHealth, getTargets, searchAnalogs } from "./api.js";
 
 type IconName = "orbit" | "arrow" | "layers" | "download" | "target" | "cube" | "scan" | "plus" | "minus" | "chevron";
+type Planet = "moon" | "mars";
+type Layer = "similarity" | "topography" | "mineralogy" | "climate";
+
+type Target = {
+  planet: Planet;
+  site_id: string;
+  site_name: string;
+  coordinates: { lat: number; lng: number };
+  avg_slope_deg: number | null;
+  elevation_m: number | null;
+  primary_rock: string | null;
+  temp_range_c: number[] | null;
+  data_source: string;
+};
+
+type Analog = {
+  site_id: string;
+  name: string;
+  country: string;
+  coordinates: { lat: number; lng: number };
+  similarity_score: number;
+  breakdown: { topography_match: number; geochemistry_match: number; climate_match: number };
+  metadata: { elevation_m: number | null; primary_rock: string | null; accessibility_rating: string };
+};
+
+type Health = { status: string; database?: string };
+
+const SEARCH_BODY = {
+  weights: { topography: 0.4, geochemistry: 0.35, climate: 0.25 },
+  constraints: { subterranean_only: false, min_similarity: 0, limit: 20 },
+};
 
 function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
   const paths: Record<IconName, React.ReactNode> = {
@@ -19,125 +51,315 @@ function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden>{paths[name]}</svg>;
 }
 
-const moonImage = "https://images.unsplash.com/photo-1711559652900-51614fe511ef?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixlib=rb-4.1.0&q=85&w=1400";
-
 function Logo() {
   return <div className="logo"><span className="logo-mark"><Icon name="orbit" size={22}/></span><span>ASTRO<span>TERRAIN</span></span></div>;
 }
 
-function Landing({ onLaunch }: { onLaunch: () => void }) {
-  const [target, setTarget] = useState<"lunar" | "mars">("lunar");
+function formatCoord(lat: number, lng: number) {
+  const ns = lat >= 0 ? "N" : "S";
+  const ew = lng >= 0 ? "E" : "W";
+  return `${Math.abs(lat).toFixed(2)}°${ns} · ${Math.abs(lng).toFixed(2)}°${ew}`;
+}
+
+function formatNumber(value: number | null | undefined, suffix = "") {
+  if (value == null || Number.isNaN(value)) return "—";
+  return `${Math.round(value).toLocaleString("en-US")}${suffix}`;
+}
+
+function errorText(error: unknown) {
+  if (error instanceof ApiError) {
+    if (error.status === 404) return error.message;
+    if (error.status === 422) return error.message || "The search filters were rejected.";
+    if (error.status === 0) return error.message;
+    return error.message;
+  }
+  return "Something went wrong while talking to the API.";
+}
+
+function project(lat: number, lng: number) {
+  const phi = (lat * Math.PI) / 180;
+  const lambda = ((lng + 90) * Math.PI) / 180;
+  const phi0 = (8 * Math.PI) / 180;
+  const cosC = Math.sin(phi0) * Math.sin(phi) + Math.cos(phi0) * Math.cos(phi) * Math.cos(lambda);
+  if (cosC < 0.08) return null;
+  const x = Math.cos(phi) * Math.sin(lambda);
+  const y = Math.cos(phi0) * Math.sin(phi) - Math.sin(phi0) * Math.cos(phi) * Math.cos(lambda);
+  return { left: `${50 + x * 28}%`, top: `${50 - y * 28}%` };
+}
+
+function pinLabel(site: Analog, layer: Layer) {
+  if (layer === "topography") return `${Math.round(site.breakdown.topography_match)}%`;
+  if (layer === "climate") return `${Math.round(site.breakdown.climate_match)}%`;
+  if (layer === "mineralogy") return (site.metadata.primary_rock ?? "—").toUpperCase();
+  return `${Math.round(site.similarity_score)}%`;
+}
+
+function download(filename: string, contents: string, type: string) {
+  const url = URL.createObjectURL(new Blob([contents], { type }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function Landing({
+  targets,
+  target,
+  health,
+  error,
+  onSelect,
+  onLaunch,
+}: {
+  targets: Target[];
+  target: Target | null;
+  health: Health | null;
+  error: string | null;
+  onSelect: (target: Target) => void;
+  onLaunch: () => void;
+}) {
+  const planet = target?.planet ?? "moon";
+  const apiLabel = !health ? "CHECKING" : health.status === "ok" ? "OPERATIONAL" : "DEGRADED";
   return <main className="landing">
     <div className="stars"/>
     <div className="planet moon"/>
     <div className="planet mars"/>
     <nav className="landing-nav">
       <Logo/>
-      <div className="nav-actions"><span className="nasa-source">NASA OPEN DATA <b>LRO · MRO</b></span><span className="status"><i/> API <b>OPERATIONAL</b></span><button className="btn primary" onClick={onLaunch}>Launch engine <Icon name="arrow"/></button></div>
+      <div className="nav-actions">
+        <span className="nasa-source">NASA OPEN DATA <b>LRO · MRO</b></span>
+        <span className="status"><i/> API <b>{apiLabel}</b></span>
+        <button className="btn primary" onClick={onLaunch} disabled={!target}>Launch engine <Icon name="arrow"/></button>
+      </div>
     </nav>
-    <div className="mission-ribbon"><span>ASTROTERRAIN / MISSION ANALOG SYSTEM</span><span>LIVE ORBITAL DATA</span><span>02 TARGETS</span><span>12 EARTH ANALOGS</span><span>CALIBRATION 99.8%</span></div>
+    <div className="mission-ribbon">
+      <span>ASTROTERRAIN / MISSION ANALOG SYSTEM</span>
+      <span>{health?.database === "connected" ? "DATABASE CONNECTED" : "DATABASE CHECK"}</span>
+      <span>{String(targets.length).padStart(2, "0")} TARGETS</span>
+      <span>{target ? target.data_source.replaceAll("_", " ").toUpperCase() : "AWAITING TARGETS"}</span>
+    </div>
     <section className="launch-stage">
       <div className="launch-copy">
         <div className="eyebrow"><span>PLANETARY ANALOG EXPLORER / 2025</span><i/></div>
         <h1>Earth is our<br/><em>testing ground.</em></h1>
-        <p>Find the places on Earth that behave like another world. Compare terrain, climate, and chemistry using live NASA orbital data.</p>
-        <button className="launch-cta" onClick={onLaunch}><span>Begin mission</span><i><Icon name="arrow" size={21}/></i></button>
+        <p>Find the places on Earth that behave like another world. Compare terrain, climate, and chemistry using the analog search API.</p>
+        <button className="launch-cta" onClick={onLaunch} disabled={!target}><span>Begin mission</span><i><Icon name="arrow" size={21}/></i></button>
+        {error && <p className="api-note">{error}</p>}
       </div>
-      <div className={`orbital-display ${target}`}>
+      <div className={`orbital-display ${planet === "mars" ? "mars" : ""}`}>
         <div className="orbit-ring ring-one"/><div className="orbit-ring ring-two"/><div className="orbit-ring ring-three"/>
         <div className="crosshair horizontal"/><div className="crosshair vertical"/>
         <div className="display-planet"/>
         <div className="planet-scan"/>
-        <span className="orbit-label label-a">ORBIT 89.7°</span><span className="orbit-label label-b">ALT 50 KM</span>
-        <div className="target-readout"><span>ACTIVE TARGET / {target === "lunar" ? "LUNAR" : "MARTIAN"}</span><strong>{target === "lunar" ? "Shackleton" : "Jezero"}</strong><small>{target === "lunar" ? "89.90°S · 0.00°E" : "18.38°N · 77.58°E"}</small></div>
+        <span className="orbit-label label-a">{planet === "mars" ? "MARS" : "MOON"}</span>
+        <span className="orbit-label label-b">{target ? `${formatNumber(target.elevation_m, " M")}` : "NO TARGET"}</span>
+        <div className="target-readout">
+          <span>ACTIVE TARGET / {planet === "mars" ? "MARTIAN" : "LUNAR"}</span>
+          <strong>{target ? target.site_name.replace(/ \(synthetic demo profile\)/i, "") : "Loading"}</strong>
+          <small>{target ? formatCoord(target.coordinates.lat, target.coordinates.lng) : "—"}</small>
+        </div>
       </div>
       <div className="mission-selector">
         <span className="selector-caption">CHOOSE DESTINATION</span>
-        <button className={target === "lunar" ? "active" : ""} onClick={() => setTarget("lunar")}><i>01</i><span><small>MOON / SOUTH POLE</small><b>Shackleton Crater</b></span><em>89.90°S</em></button>
-        <button className={target === "mars" ? "active mars-choice" : ""} onClick={() => setTarget("mars")}><i>02</i><span><small>MARS / JEZERO</small><b>Jezero Crater</b></span><em>18.38°N</em></button>
+        {targets.length === 0 && <p className="selector-empty">{error ? "Targets unavailable" : "Loading targets"}</p>}
+        {targets.map((item, index) => (
+          <button
+            key={`${item.planet}-${item.site_id}`}
+            className={target?.site_id === item.site_id && target.planet === item.planet ? `active${item.planet === "mars" ? " mars-choice" : ""}` : ""}
+            onClick={() => onSelect(item)}
+          >
+            <i>{String(index + 1).padStart(2, "0")}</i>
+            <span><small>{item.planet === "mars" ? "MARS" : "MOON"} / {item.site_id.replaceAll("-", " ").toUpperCase()}</small><b>{item.site_name.replace(/ \(synthetic demo profile\)/i, "")}</b></span>
+            <em>{formatCoord(item.coordinates.lat, item.coordinates.lng).split(" · ")[0]}</em>
+          </button>
+        ))}
       </div>
-      <div className="launch-stats"><span><b>42</b> ORBITAL DATASETS</span><span><b>5M</b> SURFACE RESOLUTION</span><span><b>12</b> ANALOG SITES READY</span></div>
     </section>
-    <footer><span>NASA SPACE APPS / 2025</span><span className="mono">SYS.TIME 14:32:08 UTC</span><span>SCROLL TO EXPLORE ↓</span></footer>
+    <footer><span>NASA SPACE APPS / 2025</span><span className="mono">API /api/v1</span><span>SELECT A TARGET TO EXPLORE</span></footer>
   </main>;
 }
 
-function Range({ label, value, color = "cyan" }: { label: string; value: number; color?: string }) {
-  return <div className="range-field"><div><span>{label}</span><b>{value}%</b></div><input aria-label={label} type="range" defaultValue={value} style={{ "--value": `${value}%`, "--range": color === "cyan" ? "#A0BEFF" : "#F2E8C9" } as React.CSSProperties}/></div>;
-}
-
-function Radar() {
-  return <svg className="radar" viewBox="0 0 220 170" aria-label="Parameters comparison radar chart">
-    <g className="radar-grid"><path d="M110 14 192 62 169 146H51L28 62Z"/><path d="M110 39 167 72 151 130H69L53 72Z"/><path d="M110 64 143 82 133 113H87L77 82Z"/><path d="M110 14v132M28 62l141 84M192 62 51 146M28 62h164M110 14l59 132"/></g>
-    <path className="radar-earth" d="M110 28 177 69 158 130 60 137 45 67Z"/>
-    <path className="radar-target" d="M110 48 155 77 139 118 73 126 60 73Z"/>
-    <g className="radar-labels"><text x="110" y="9">TOPOGRAPHY</text><text x="198" y="63">SLOPE</text><text x="167" y="162">CLIMATE</text><text x="21" y="162">ACCESS</text><text x="0" y="63">MINERAL</text></g>
-  </svg>;
-}
-
-function Dashboard({ onHome }: { onHome: () => void }) {
-  const [report, setReport] = useState(false);
-  const [selectedSite, setSelectedSite] = useState<string | null>(null);
-  const sites = {
-    atacama: { name: "Atacama Desert", place: "Antofagasta, Chile", score: 94, coords: "24.50° S · 69.25° W", temp: "−12°C", slope: "18.4°" },
-    mauna: { name: "Mauna Loa", place: "Hawaiʻi, USA", score: 89, coords: "19.47° N · 155.60° W", temp: "−4°C", slope: "22.1°" },
-    iceland: { name: "Askja Caldera", place: "Highlands, Iceland", score: 86, coords: "65.03° N · 16.75° W", temp: "−8°C", slope: "16.8°" },
+function Report({ target, analog, onClose }: { target: Target; analog: Analog; onClose: () => void }) {
+  const brief = {
+    target: { planet: target.planet, site_id: target.site_id, site_name: target.site_name, coordinates: target.coordinates },
+    analog,
   };
-  const active = selectedSite ? sites[selectedSite as keyof typeof sites] : null;
+  return <div className="modal-backdrop" onMouseDown={onClose}><div className="report glass" onMouseDown={(event) => event.stopPropagation()}>
+    <div className="report-head"><div><span className="eyebrow-mini">COMPARATIVE REPORT / {analog.site_id.toUpperCase()}</span><h2>Mission Analog Brief</h2></div><button className="close" onClick={onClose}>×</button></div>
+    <div className="compare">
+      <div className="compare-tile earth-tile"><span>EARTH ANALOG</span><strong>{analog.name}</strong><small>{formatCoord(analog.coordinates.lat, analog.coordinates.lng)}</small></div>
+      <div className="compare-divider"><span>{Math.round(analog.similarity_score)}%</span><small>SIMILARITY</small></div>
+      <div className="compare-tile lunar-tile"><span>{target.planet === "mars" ? "MARS TARGET" : "LUNAR TARGET"}</span><strong>{target.site_name.replace(/ \(synthetic demo profile\)/i, "")}</strong><small>{formatCoord(target.coordinates.lat, target.coordinates.lng)}</small></div>
+    </div>
+    <div className="ai-summary">
+      <div className="ai-title"><Icon name="orbit"/><span><small>ANALOG SEARCH</small><b>Score breakdown from the API</b></span><em>{target.data_source.replaceAll("_", " ").toUpperCase()}</em></div>
+      <p>{analog.name} in {analog.country} scores {analog.similarity_score} against {target.site_name}. Topography {analog.breakdown.topography_match}, geochemistry {analog.breakdown.geochemistry_match}, climate {analog.breakdown.climate_match}. These figures come from the current scoring baseline.</p>
+      <div className="summary-grid">
+        <div><span>ELEVATION</span><b>{formatNumber(analog.metadata.elevation_m, " m")}</b><small>metadata.elevation_m</small></div>
+        <div><span>ROCK</span><b>{analog.metadata.primary_rock ?? "Unknown"}</b><small>metadata.primary_rock</small></div>
+        <div><span>ACCESS</span><b>{analog.metadata.accessibility_rating}</b><small>metadata.accessibility_rating</small></div>
+      </div>
+    </div>
+    <div className="export-bar">
+      <div><span>REPORT READY</span><small>{analog.country} · {analog.site_id}</small></div>
+      <button className="btn secondary" onClick={() => download(`${analog.site_id}.geojson`, JSON.stringify({ type: "Feature", geometry: { type: "Point", coordinates: [analog.coordinates.lng, analog.coordinates.lat] }, properties: { site_id: analog.site_id, name: analog.name, similarity_score: analog.similarity_score } }, null, 2), "application/geo+json")}><Icon name="download"/> Download GeoJSON</button>
+      <button className="btn primary" onClick={() => download(`${analog.site_id}-brief.json`, JSON.stringify(brief, null, 2), "application/json")}><Icon name="download"/> Export JSON brief</button>
+    </div>
+  </div></div>;
+}
+
+function Dashboard({ target, targets, onHome, onTargetChange }: { target: Target; targets: Target[]; onHome: () => void; onTargetChange: (target: Target) => void }) {
+  const [layer, setLayer] = useState<Layer>("similarity");
+  const [analogs, setAnalogs] = useState<Analog[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [report, setReport] = useState(false);
+  const [zoom, setZoom] = useState(1);
+  const selected = analogs.find((site) => site.site_id === selectedId) ?? null;
+  const visible = analogs.flatMap((site) => {
+    const point = project(site.coordinates.lat, site.coordinates.lng);
+    return point ? [{ site, point }] : [];
+  });
+  const hidden = analogs.filter((site) => !project(site.coordinates.lat, site.coordinates.lng));
+  const high = analogs.filter((site) => site.similarity_score >= 75).length;
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    setSelectedId(null);
+    searchAnalogs({ target_planet: target.planet, target_site_id: target.site_id, ...SEARCH_BODY })
+      .then((result) => { if (!cancelled) setAnalogs(result.analogs ?? []); })
+      .catch((reason) => { if (!cancelled) { setAnalogs([]); setError(errorText(reason)); } })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [target.planet, target.site_id]);
+
   return <main className="dashboard">
-    <header className="dash-nav"><button className="plain" onClick={onHome}><Logo/></button><div className="target-switch"><span className="tiny-orb"/><span><small>ACTIVE TARGET</small><b>Shackleton Crater, Moon</b></span><Icon name="chevron"/></div><div className="dash-meta"><span className="mission-id">MISSION AT–01</span><span className="status"><i/> LIVE DATA</span><span className="mono">89.90°S&nbsp;&nbsp;0.00°E</span><button className="btn secondary" onClick={() => setReport(true)}><Icon name="download"/> Export</button></div></header>
+    <header className="dash-nav">
+      <button className="plain" onClick={onHome}><Logo/></button>
+      <label className="target-switch">
+        <span className={`tiny-orb${target.planet === "mars" ? " mars" : ""}`}/>
+        <span>
+          <small>ACTIVE TARGET</small>
+          <select
+            aria-label="Active target"
+            value={`${target.planet}|${target.site_id}`}
+            onChange={(event) => {
+              const next = targets.find((item) => `${item.planet}|${item.site_id}` === event.target.value);
+              if (next) onTargetChange(next);
+            }}
+          >
+            {targets.map((item) => <option key={`${item.planet}|${item.site_id}`} value={`${item.planet}|${item.site_id}`}>{item.site_name}</option>)}
+          </select>
+        </span>
+        <Icon name="chevron"/>
+      </label>
+      <div className="dash-meta">
+        <span className="mission-id">{target.planet.toUpperCase()} / {target.site_id}</span>
+        <span className="status"><i/> {loading ? "SEARCHING" : error ? "SEARCH FAILED" : "LIVE DATA"}</span>
+        <span className="mono">{formatCoord(target.coordinates.lat, target.coordinates.lng)}</span>
+        <button className="btn secondary" onClick={() => selected && setReport(true)} disabled={!selected}><Icon name="download"/> Export</button>
+      </div>
+    </header>
     <section className="earth-workspace">
       <div className="space-dust"/>
-      <div className="globe-heading"><span>EARTH ANALOG NETWORK</span><b>Explore candidate terrain</b><small>Select a signal to descend to site level</small></div>
-      <div className="globe-wrap">
+      <div className="globe-heading">
+        <span>EARTH ANALOG NETWORK</span>
+        <b>Explore candidate terrain</b>
+        <small>{loading ? "Searching analogs…" : error ? error : "Select a signal to descend to site level"}</small>
+      </div>
+      <div className="globe-wrap is-live" style={{ transform: `translate(-50%, -50%) scale(${zoom})` }}>
         <div className="globe-orbit orbit-a"/><div className="globe-orbit orbit-b"/>
         <div className="earth-globe"><div className="earth-texture"/><div className="earth-atmosphere"/></div>
-        <button className="globe-pin atacama" onClick={() => setSelectedSite("atacama")}><i/><span>ATACAMA <b>94%</b></span></button>
-        <button className="globe-pin mauna" onClick={() => setSelectedSite("mauna")}><i/><span>MAUNA LOA <b>89%</b></span></button>
-        <button className="globe-pin iceland" onClick={() => setSelectedSite("iceland")}><i/><span>ASKJA <b>86%</b></span></button>
+        {visible.map(({ site, point }) => (
+          <button key={site.site_id} className={`globe-pin${selectedId === site.site_id ? " is-selected" : ""}`} style={point} onClick={() => setSelectedId(site.site_id)}>
+            <i/><span>{site.name.toUpperCase()} <b>{pinLabel(site, layer)}</b></span>
+          </button>
+        ))}
       </div>
       <div className="globe-tools">
-        <button aria-label="Zoom in"><Icon name="plus"/></button><button aria-label="Zoom out"><Icon name="minus"/></button><i/><button aria-label="Reset view"><Icon name="scan"/></button><button aria-label="Map layers"><Icon name="layers"/></button>
+        <button aria-label="Zoom in" onClick={() => setZoom((value) => Math.min(1.35, Number((value + 0.08).toFixed(2))))}><Icon name="plus"/></button>
+        <button aria-label="Zoom out" onClick={() => setZoom((value) => Math.max(0.8, Number((value - 0.08).toFixed(2))))}><Icon name="minus"/></button>
+        <i/>
+        <button aria-label="Reset view" onClick={() => setZoom(1)}><Icon name="scan"/></button>
+        <button aria-label="Map layers" onClick={() => setLayer((current) => current === "similarity" ? "topography" : current === "topography" ? "mineralogy" : current === "mineralogy" ? "climate" : "similarity")}><Icon name="layers"/></button>
       </div>
-      <div className="layer-rail"><span>DATA LAYERS</span><button className="active"><i/> Similarity</button><button><i/> Topography</button><button><i/> Mineralogy</button><button><i/> Climate</button></div>
-      <div className="globe-compass"><span>N</span><i/><b>3D</b></div>
-      <div className="globe-readout mono"><span>ALT 12,742 KM</span><span>CAM 18.4°</span><span>RES 5.0 M/PX</span></div>
-      <div className="candidate-strip"><span><b>12</b> ANALOG SITES</span><span><b>03</b> HIGH CONFIDENCE</span><span><b>42</b> DATA LAYERS</span><span className="live-pulse">ORBITAL FEED LIVE</span></div>
-      {active && <aside className="location-sheet">
-        <button className="sheet-close" onClick={() => setSelectedSite(null)}>×</button>
-        <div className="sheet-kicker"><span>SELECTED ANALOG</span><em>{active.score}% MATCH</em></div>
-        <h2>{active.name}</h2><p>{active.place}</p>
-        <div className="sheet-coords mono">{active.coords}</div>
-        <div className="flyover"><div className="flyover-terrain"/><span><Icon name="scan"/> LIVE TERRAIN PREVIEW</span></div>
-        <div className="sheet-metrics"><div><small>SURFACE TEMP.</small><b>{active.temp}</b></div><div><small>MEAN SLOPE</small><b>{active.slope}</b></div><div><small>ACCESS</small><b>GOOD</b></div></div>
-        <div className="match-bar"><span>Terrain similarity</span><b>{active.score}%</b><i style={{ "--match": `${active.score}%` } as React.CSSProperties}/></div>
+      <div className="layer-rail" role="radiogroup" aria-label="Data layers">
+        <span>DATA LAYERS</span>
+        {(["similarity", "topography", "mineralogy", "climate"] as Layer[]).map((item) => (
+          <button key={item} className={layer === item ? "active" : ""} role="radio" aria-checked={layer === item} onClick={() => setLayer(item)}><i/> {item[0].toUpperCase() + item.slice(1)}</button>
+        ))}
+      </div>
+      {hidden.length > 0 && <div className="far-side">{hidden.map((site) => <button key={site.site_id} onClick={() => setSelectedId(site.site_id)}>{site.name} · far side</button>)}</div>}
+      {!loading && !error && analogs.length === 0 && <p className="globe-empty">No analogs matched this target.</p>}
+      <div className="globe-compass"><span>N</span><i/><b>2D</b></div>
+      <div className="globe-readout mono"><span>ZOOM {zoom.toFixed(2)}</span><span>LAYER {layer.toUpperCase()}</span><span>{analogs.length} RESULTS</span></div>
+      <div className="candidate-strip">
+        <span><b>{String(analogs.length).padStart(2, "0")}</b> ANALOG SITES</span>
+        <span><b>{String(high).padStart(2, "0")}</b> HIGH CONFIDENCE</span>
+        <span><b>03</b> SCORE FIELDS</span>
+        <span className="live-pulse">{error ? "SEARCH ERROR" : "ORBITAL FEED LIVE"}</span>
+      </div>
+      {selected && <aside className="location-sheet">
+        <button className="sheet-close" onClick={() => setSelectedId(null)}>×</button>
+        <div className="sheet-kicker"><span>SELECTED ANALOG</span><em>{Math.round(selected.similarity_score)}% MATCH</em></div>
+        <h2>{selected.name}</h2>
+        <p>{selected.country}</p>
+        <div className="sheet-coords mono">{formatCoord(selected.coordinates.lat, selected.coordinates.lng)}</div>
+        <div className="sheet-metrics">
+          <div><small>ELEVATION</small><b>{formatNumber(selected.metadata.elevation_m, " m")}</b></div>
+          <div><small>ROCK</small><b>{selected.metadata.primary_rock ?? "Unknown"}</b></div>
+          <div><small>ACCESS</small><b>{selected.metadata.accessibility_rating}</b></div>
+        </div>
+        <div className="score-breakdown">
+          <span>Topography {Math.round(selected.breakdown.topography_match)}%</span>
+          <span>Geochemistry {Math.round(selected.breakdown.geochemistry_match)}%</span>
+          <span>Climate {Math.round(selected.breakdown.climate_match)}%</span>
+        </div>
+        <div className="match-bar"><span>Terrain similarity</span><b>{Math.round(selected.similarity_score)}%</b><i style={{ "--match": `${selected.similarity_score}%` } as React.CSSProperties}/></div>
         <button className="descend" onClick={() => setReport(true)}>Descend to site <Icon name="arrow"/></button>
       </aside>}
     </section>
-    {report && <Report onClose={() => setReport(false)}/>}
+    {report && selected && <Report target={target} analog={selected} onClose={() => setReport(false)}/>}
   </main>;
-}
-
-function Report({ onClose }: { onClose: () => void }) {
-  return <div className="modal-backdrop" onMouseDown={onClose}><div className="report glass" onMouseDown={e => e.stopPropagation()}>
-    <div className="report-head"><div><span className="eyebrow-mini">COMPARATIVE REPORT / AT-0084</span><h2>Mission Analog Brief</h2></div><button className="close" onClick={onClose}>×</button></div>
-    <div className="compare">
-      <div className="compare-tile earth-tile"><span>EARTH ANALOG</span><strong>Atacama Desert</strong><small>24.50°S · 69.25°W</small></div>
-      <div className="compare-divider"><span>94%</span><small>SIMILARITY</small></div>
-      <div className="compare-tile lunar-tile"><span>LUNAR TARGET</span><strong>Shackleton Crater</strong><small>89.90°S · 0.00°E</small></div>
-    </div>
-    <div className="ai-summary"><div className="ai-title"><Icon name="orbit"/><span><small>ASTROTERRAIN INTELLIGENCE</small><b>Mission suitability assessment</b></span><em>GENERATED 14:32 UTC</em></div><p>The Atacama’s hyper-arid, high-UV terrain offers an exceptional operational analog for south-polar lunar missions. Surface mineralogy and regolith mechanics support high-fidelity rover mobility and suit abrasion testing.</p><div className="summary-grid"><div><span>LOGISTICS</span><b>High accessibility</b><small>Road access within 8 km</small></div><div><span>PRIMARY HAZARD</span><b>Extreme UV exposure</b><small>UV index 11+</small></div><div><span>SUIT TESTING</span><b>Excellent</b><small>Fine particulate environment</small></div></div></div>
-    <div className="export-bar"><div><span>REPORT READY</span><small>All datasets validated · 18.4 MB</small></div><button className="btn secondary"><Icon name="download"/> Download GeoJSON</button><button className="btn primary"><Icon name="download"/> Export PDF Brief</button></div>
-  </div></div>;
 }
 
 export default function App() {
   const [view, setView] = useState<"landing" | "warp" | "dashboard">("landing");
-  const launch = () => setView("warp");
-  useEffect(() => { if (view === "warp") { const id = setTimeout(() => setView("dashboard"), 1450); return () => clearTimeout(id); }}, [view]);
+  const [targets, setTargets] = useState<Target[]>([]);
+  const [target, setTarget] = useState<Target | null>(null);
+  const [health, setHealth] = useState<Health | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    getHealth().then((result) => { if (!cancelled) setHealth(result); }).catch(() => { if (!cancelled) setHealth({ status: "degraded", database: "unavailable" }); });
+    getTargets()
+      .then((result) => {
+        if (cancelled) return;
+        const list = result.targets ?? [];
+        setTargets(list);
+        setTarget((current) => current ?? list.find((item) => item.planet === "moon") ?? list[0] ?? null);
+      })
+      .catch((reason) => { if (!cancelled) setError(errorText(reason)); });
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    if (view !== "warp") return undefined;
+    const id = window.setTimeout(() => setView("dashboard"), 1450);
+    return () => window.clearTimeout(id);
+  }, [view]);
+
+  function launch() {
+    if (target) setView("warp");
+  }
+
   return <div className="figma-app">
-    {view === "warp"
-      ? <div className="warp"><Logo/><div className="warp-lines"/><span>INITIALIZING TERRAIN ENGINE</span><small>CALIBRATING ORBITAL DATA</small></div>
-      : view === "landing" ? <Landing onLaunch={launch}/> : <Dashboard onHome={() => setView("landing")}/>}
+    {view === "warp" && <div className="warp"><Logo/><div className="warp-lines"/><span>INITIALIZING TERRAIN ENGINE</span><small>CALIBRATING ORBITAL DATA</small></div>}
+    {view === "landing" && <Landing targets={targets} target={target} health={health} error={error} onSelect={setTarget} onLaunch={launch}/>}
+    {view === "dashboard" && target && <Dashboard target={target} targets={targets} onHome={() => setView("landing")} onTargetChange={setTarget}/>}
   </div>;
 }

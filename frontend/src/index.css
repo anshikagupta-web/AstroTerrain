@@ -186,3 +186,18 @@
 .earth-atmosphere{box-shadow:inset 0 0 13px rgba(0,0,0,.58),0 0 4px rgba(0,0,0,.9);background:transparent}
 
 body:has(.figma-app){background:#0b1026;color:#a0beff;overflow-x:hidden}
+
+.api-note{margin-top:18px;max-width:460px;color:#f2e8c9;font-size:12px;line-height:1.5}
+.launch-cta:disabled,.btn:disabled{opacity:.45;cursor:not-allowed;transform:none}
+.selector-empty{margin:0;align-self:center;font:500 8px "JetBrains Mono";letter-spacing:.12em;color:#a0beff}
+.target-switch select{appearance:none;background:transparent;border:0;color:#f2e8c9;font:600 11px "Plus Jakarta Sans",sans-serif;max-width:220px;padding:0}
+.target-switch select option{color:#0b1026}
+.tiny-orb.mars{background:radial-gradient(circle at 35% 35%,#d7b08a,#6a3a28 70%)}
+.globe-wrap.is-live .earth-texture{animation:none}
+.globe-pin.is-selected span{border-color:#f2e8c9;color:#f2e8c9}
+.globe-empty,.far-side{position:absolute;z-index:4}
+.globe-empty{left:50%;bottom:72px;transform:translateX(-50%);margin:0;color:#f2e8c9;font:500 11px "JetBrains Mono";letter-spacing:.08em}
+.far-side{left:3vw;bottom:64px;display:flex;flex-direction:column;gap:6px}
+.far-side button{background:rgba(11,16,38,.78);border:1px solid rgba(160,190,255,.28);color:#f2e8c9;font:500 8px "JetBrains Mono";padding:6px 8px;cursor:pointer}
+.score-breakdown{display:flex;flex-wrap:wrap;gap:8px 12px;margin:12px 0;color:#a0beff;font:500 8px "JetBrains Mono";letter-spacing:.06em}
+@media(max-width:760px){.dash-nav .target-switch{display:flex;position:static;transform:none;min-width:0}}
