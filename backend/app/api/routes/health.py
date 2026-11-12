@@ -1,28 +1,19 @@
-from typing import Annotated
-
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
+from fastapi.responses import JSONResponse
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from app.db.session import get_session
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session
+from app.db.session import get_db
 
 router = APIRouter(tags=["health"])
 
-
 @router.get("/health")
-async def live() -> dict[str, str]:
-    """Liveness: confirms the HTTP server responds, not database connectivity."""
-    return {"status": "ok"}
-
-
-@router.get("/health/db")
-async def database_health(
-    session: Annotated[AsyncSession, Depends(get_session)],
-) -> dict[str, str]:
+def health_check(db: Session = Depends(get_db)):
     try:
-        result = await session.execute(text("SELECT PostGIS_Version()"))
-        version = str(result.scalar_one())
-    except Exception as exc:
-        # Do not leak DB credentials or internal exception text to callers.
-        raise HTTPException(status_code=503, detail="Database/PostGIS not ready") from exc
-    return {"status": "ok", "postgis_version": version}
+        version = db.execute(text("SELECT PostGIS_Full_Version()")).scalar_one()
+        return {"status": "ok", "service": "astroterrain-api", "database": "connected", "postgis_version": version}
+    except SQLAlchemyError:
+        return JSONResponse(
+            status_code=503,
+            content={"status": "degraded", "service": "astroterrain-api", "database": "unavailable"},
+        )

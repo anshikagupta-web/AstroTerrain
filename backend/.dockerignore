@@ -1,7 +1,10 @@
 .git
-.env
+.github
 .venv
+venv
 __pycache__
 .pytest_cache
-*.pyc
-*.zip
+.mypy_cache
+.env
+*.py[cod]
+*.log

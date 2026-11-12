@@ -1,184 +1,354 @@
-# AstroTerrain — Module 3 Backend Starter
+﻿# AstroTerrain — Module 3 Backend
 
-**Milestone 1:** FastAPI + Dockerized PostgreSQL 15 / PostGIS 3.3 + versioned and validated REST APIs.
+Development starter: FastAPI + Pydantic v2 + PostgreSQL 15/PostGIS 3.3, SQLAlchemy 2, Psycopg 3, and a deterministic analog-scoring baseline.
 
-This is a separate starter you can put into the shared repository under a backend directory, or run independently. It is **not** a finished satellite ingestion or ML implementation.
+> **Demo-data warning:** SQL seed records are synthetic values for software testing only. They are not validated planetary science, measurements, or mission-site recommendations. Replace them with validated project data before scientific interpretation.
 
-## Prerequisites
+## Folder map
 
-- Windows PowerShell, macOS Terminal, or Linux shell
-- Docker Desktop with Docker Compose (Docker Desktop must be running)
-- Optional for running tests outside Docker: Python 3.11+
+```text
+backend/
+├── app/api/routes/       # HTTP endpoints
+├── app/core/             # settings
+├── app/db/               # SQLAlchemy session and PostGIS queries
+├── app/schemas/          # Pydantic request/response models
+├── app/services/         # similarity scoring
+├── database/init/        # SQL schema and demo seed data
+├── tests/                # unit/API smoke tests
+├── .env.example
+├── Dockerfile
+├── docker-compose.yml
+└── requirements*.txt
+```
 
-## Easiest way to run (Windows PowerShell)
+## Windows setup (PowerShell)
 
-Open PowerShell *inside this extracted folder* and run:
+From VS Code terminal:
 
 ```powershell
+cd path\to\AstroTerrain\backend
 Copy-Item .env.example .env
-# Optional: edit .env to change local-only credentials
-
+docker compose config
 docker compose up --build -d
 docker compose ps
 ```
 
-Visit:
+Docker Desktop must be installed and running before the Docker commands. First build may take several minutes because the geospatial Python packages are installed.
 
-- Swagger UI: http://localhost:8000/docs
-- HTTP check: http://localhost:8000/health
-- Database/PostGIS check: http://localhost:8000/health/db
-- Planetary targets: http://localhost:8000/api/v1/targets
-- Earth GeoJSON: http://localhost:8000/api/v1/analogs/geojson
+Open:
+- API docs: http://localhost:8000/docs
+- Health: http://localhost:8000/api/v1/health
+- Targets: http://localhost:8000/api/v1/targets
 
-Expected `/health/db` shape: `{"status":"ok","postgis_version":"..."}`.
+Check PostGIS:
 
-Expected `/api/v1/targets` includes `moon_shackleton` and `mars_jezero`.
+```powershell
+docker compose exec db psql -U astroterrain -d astroterrain -c "SELECT PostGIS_Full_Version();"
+```
 
-**Important:** the first database startup creates the tables and the named target records automatically. All target measurements are null until backed by actual sources, and NO Earth tile scores are manufactured.
-
-## Try the POST endpoint on Windows PowerShell
+## Test the analog search (PowerShell)
 
 ```powershell
 $body = @{
     target_planet = "moon"
-    target_site_id = "moon_shackleton"
-    weights = @{
-        topography = 0.4
-        geochemistry = 0.4
-        climate = 0.2
-    }
-    constraints = @{
-        subterranean_only = $false
-        min_similarity = 50.0
-    }
-} | ConvertTo-Json -Depth 5
+    target_site_id = "shackleton-crater"
+    weights = @{ topography = 0.40; geochemistry = 0.35; climate = 0.25 }
+    constraints = @{ subterranean_only = $false; min_similarity = 0; limit = 10 }
+} | ConvertTo-Json -Depth 6
 
-Invoke-RestMethod -Uri "http://localhost:8000/api/v1/analogs/search" `
-    -Method Post -ContentType "application/json" -Body $body | ConvertTo-Json -Depth 8
+Invoke-RestMethod -Method Post -Uri "http://localhost:8000/api/v1/analogs/search" -ContentType "application/json" -Body $body
 ```
 
-For the brand-new database, the exact expected response is:
+Try Mars with `target_planet = "mars"` and `target_site_id = "jezero-crater"`.
 
-```json
-{
-  "status": "success",
-  "target_site_name": "Shackleton Crater",
-  "results_count": 0,
-  "analogs": []
-}
-```
-
-This is a **successful contract test, not a real analog search result**. Earth tiles have not been imported and Module 4 has not been wired up yet. If Earth tiles exist but Module 4 is disconnected, the search responds `503` instead of making up scores.
-
-## Endpoints
-
-| HTTP method | Path | Purpose |
-|---|---|---|
-| GET | `/health` | API liveness |
-| GET | `/health/db` | Check PostgreSQL and PostGIS |
-| GET | `/api/v1/targets` | Discover seeded reference target IDs |
-| GET | `/api/v1/analogs/geojson?limit=250` | Earth-only GeoJSON `FeatureCollection` (limit 1-5000) |
-| POST | `/api/v1/analogs/search` | Module 1 -> Module 4 -> Module 2 integration contract |
-
-`/api/v1/analogs/search` accepts the exact agreed request and response field names. Inputs are validated with Pydantic v2. Unknown targets return `404`, planet/ID mismatch `400`, invalid JSON body values `422`, disconnected scorer with populated candidate tiles `503`, and unimplemented subterranean-only mode `501` (rather than silently dropping a requested constraint).
-
-### Request example
-
-```json
-{
-  "target_planet": "moon",
-  "target_site_id": "moon_shackleton",
-  "weights": {
-    "topography": 0.4,
-    "geochemistry": 0.4,
-    "climate": 0.2
-  },
-  "constraints": {
-    "subterranean_only": false,
-    "min_similarity": 50.0
-  }
-}
-```
-
-Weight values are each between 0 and 1 inclusive, and at least one weight must be positive. Sum exactly 1 is *not required*; Module 4 can normalize weights. Similarity scores use a 0–100 scale. `constraints` may be omitted entirely; default minimum threshold in the search route is 50.
-
-### What Module 4 must implement
-
-Implement `ScoringEngine.score(request, target, repository) -> list[AnalogSiteResult]` from `app/services/scoring.py`. Change dependency factory `get_scoring_engine` to return the real implementation (or override the dependency in composition). All analogs must meet `AnalogSiteResult`, including `coordinates: {lat, lng}` and all three `breakdown` fields. The API filters by `min_similarity`, sorts descending, and returns correct `results_count`.
-
-The scoring engine should query validated Earth feature rows via the repository. Actual feature extraction, candidate queries, and geospatial data provenance are in the *next milestones*, not silently simulated now. An example fake engine is used **only in tests**.
-
-### What Module 2 receives
-
-- `GET /api/v1/analogs/geojson`: valid Earth-only GeoJSON FeatureCollection; each feature has Earth `Point` geometry `[longitude, latitude]` (standard GeoJSON order).
-- `POST /api/v1/analogs/search`: `analogs[i].coordinates` uses the team's desired `{lat, lng}` keys (different representation, same Earth WGS84 positions).
-
-**Scientific coordinate caveat:** `GEOMETRY(Point,4326)` is an Earth WGS84 coordinate system. Do not populate `planetary_targets.location` with lunar or Martian lon/lat as if it were Earth. The seeded targets intentionally set it to `NULL`. Planetary spatial locations need explicit celestial-body coordinates/CRS in a later schema evolution.
-
-## Run unit and API contract tests (Windows PowerShell)
+Run tests:
 
 ```powershell
-py -3.11 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
-.\.venv\Scripts\python.exe -m pytest -q
+docker compose exec api pytest -q
 ```
 
-You can also run with any installed Python 3.11+ by replacing `py -3.11` appropriately. These tests use dependency injection with fake repositories and **do not require Docker**. For live database integration, run the Compose stack and manually hit `/health/db` and `/api/v1/targets`.
-
-## Useful Docker commands
+Stop containers but keep database data:
 
 ```powershell
-docker compose logs -f web       # API logs
-docker compose logs -f db        # Database logs
-docker compose ps                # Container status
-docker compose down              # Stop containers; keep DB data
+docker compose down
 ```
 
-Only if you intentionally want to **erase all local database data**:
+**Destructive reset** — deletes the local Postgres volume and its data:
 
 ```powershell
 docker compose down -v
 ```
 
-`database/init/*.sql` files run **only when the Postgres volume is first created**. SQL edits after that need proper migrations (planned future work). Avoid `down -v` when your dataset matters.
+Do not use the destructive reset after importing real data you need to keep.
 
-## Directory structure
+## API contract
 
-```text
-app/
-  main.py                    # FastAPI, CORS, router registration
-  core/config.py             # Pydantic environment settings
-  db/session.py              # SQLAlchemy async connection/session
-  db/models.py               # ORM models for supplied SQL tables
-  db/repository.py           # Parameterized DB queries, GeoJSON
-  schemas/search.py          # Team's stable Pydantic contracts
-  services/scoring.py        # Module 4 scorer interface, no fake runtime engine
-  api/routes/health.py       # Health checks
-  api/routes/targets.py      # Target discovery
-  api/routes/analogs.py      # Search gateway + GeoJSON
+`POST /api/v1/analogs/search`
 
-database/init/
-  001_schema.sql             # PostGIS extension, tables and GiST index
-  002_seed_targets.sql       # Reference target names, no invented measurements
-
-tests/                       # API and schema tests
+```json
+{
+  "target_planet": "moon",
+  "target_site_id": "shackleton-crater",
+  "weights": {"topography": 0.4, "geochemistry": 0.35, "climate": 0.25},
+  "constraints": {"subterranean_only": false, "min_similarity": 50, "limit": 20}
+}
 ```
 
-## Shared repository integration
+Response fields: `status`, `target_site_name`, `results_count`, and `analogs[]` with `site_id`, `name`, `country`, `coordinates {lat,lng}`, `similarity_score`, `breakdown {topography_match,geochemistry_match,climate_match}`, and `metadata {elevation_m,primary_rock,accessibility_rating}`.
 
-If your team already has a frontend in the repository root, place this entire starter inside a `backend/` folder instead of overwriting their files. In that arrangement Docker bind mounts and build paths still work **when Compose is run from inside `backend/`**:
+Other endpoints:
+- `GET /api/v1/health`
+- `GET /api/v1/targets`
+- `GET /api/v1/targets?planet=moon`
+- `GET /api/v1/targets/{site_id}?planet=moon`
+
+## Scoring baseline
+
+- Topography: slope similarity.
+- Geochemistry: compares common numeric keys in planetary `regolith_composition` and Earth-analog `spectral_signature`. The current raster pipeline stores NDVI statistics in `spectral_signature`; NDVI is not mineralogical composition. Until compatible mineralogical features are supplied by both datasets, this score uses the available rock-type fallback or a neutral score.
+- Climate: overlap of target and Earth-analog temperature intervals.
+- Final score: normalized weighted average. Weights do not need to sum to 1, but cannot all be zero.
+
+This is a transparent starter heuristic, not a validated scientific model. The ML module can replace `app/services/scoring.py` while preserving the API schema.
+
+## Database
+
+- `planetary_targets`: Moon/Mars target profiles.
+- `earth_analog_tiles`: Earth-side candidate tiles.
+- Geometry is `geometry(Point, 4326)` with GiST indexes.
+- SQL init scripts run only when Postgres creates a fresh, empty data volume. Editing seed SQL later will not re-run it automatically.
+
+## GIS dependencies
+
+The API Docker image installs GeoPandas, Rasterio, Shapely, PyProj, and GDAL system utilities (`gdalinfo`, `gdal_translate`, etc.). Reusable raster sampling and vector-to-GeoJSON helpers are in `app/services/geospatial.py`. The Python `osgeo.gdal` binding is not pinned because it must match the OS-level GDAL version; Rasterio provides Python raster I/O in this starter. Add a matching Python GDAL binding later only if the pipeline needs `from osgeo import gdal`.
+
+## Official links
+
+- Docker Desktop: https://www.docker.com/products/docker-desktop/
+- Docker Windows install: https://docs.docker.com/desktop/setup/install/windows-install/
+- Microsoft WSL install: https://learn.microsoft.com/en-us/windows/wsl/install
+- FastAPI: https://fastapi.tiangolo.com/
+- Pydantic: https://docs.pydantic.dev/latest/
+- SQLAlchemy: https://docs.sqlalchemy.org/en/20/
+- Psycopg 3: https://www.psycopg.org/psycopg3/docs/
+- PostGIS: https://postgis.net/documentation/
+- PostGIS Docker image: https://hub.docker.com/r/postgis/postgis
+- GeoPandas: https://geopandas.org/en/stable/
+- Rasterio: https://rasterio.readthedocs.io/en/stable/
+- Shapely: https://shapely.readthedocs.io/en/stable/
+- PyProj: https://pyproj4.github.io/pyproj/stable/
+
+**Image version note:** Compose defaults to `postgis/postgis:15-3.3` to match the original team specification. Docker Hub still lists the tag, but it is old (last pushed several years ago). If it cannot be pulled or the team approves an upgrade, set `POSTGIS_IMAGE=postgis/postgis:15-3.7` in `.env` and confirm the version change with the team.
+
+
+---
+
+## Team Integration Guide
+
+### 1. Backend Connection
+
+Local development base URL:
+
+`http://localhost:8000`
+
+Interactive API documentation:
+
+`http://localhost:8000/docs`
+
+All versioned endpoints use `/api/v1`.
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| GET | `/api/v1/health` | API and database health |
+| GET | `/api/v1/targets` | List planetary targets |
+| GET | `/api/v1/targets?planet=moon` | Filter targets by planet |
+| GET | `/api/v1/targets/{site_id}?planet=moon` | Retrieve a target |
+| POST | `/api/v1/analogs/search` | Search Earth analogs |
+
+### 2. Frontend Integration
+
+CORS allows `http://localhost:3000` by default. Configure `CORS_ORIGINS` if the frontend uses another development origin.
+
+The analog search request accepts:
+
+- `target_planet`: `moon` or `mars`
+- `target_site_id`: planetary target identifier
+- `weights`: topography, geochemistry and climate weights
+- `constraints`: subterranean filter, minimum similarity and result limit
+
+Each analog result includes:
+
+- `site_id`, `name`, `country`
+- `coordinates.lat`, `coordinates.lng`
+- `similarity_score`
+- `breakdown.topography_match`
+- `breakdown.geochemistry_match`
+- `breakdown.climate_match`
+- `metadata.elevation_m`
+- `metadata.primary_rock`
+- `metadata.accessibility_rating`
+
+Weights must be between 0 and 1, with at least one positive weight. The result limit must be between 1 and 100.
+
+Invalid request data returns HTTP 422. A target that does not exist returns HTTP 404.
+
+
+### 3. ML Engine Integration
+
+The baseline scoring implementation is in `app/services/scoring.py`.
+
+The API calls:
+
+```python
+score_analog(target, candidate, weights)
+```
+
+Expected return structure:
+
+```python
+{
+    "similarity_score": 75.0,
+    "breakdown": {
+        "topography_match": 80.0,
+        "geochemistry_match": 70.0,
+        "climate_match": 75.0
+    }
+}
+```
+
+The values above are illustrative.
+
+The ML module can replace the baseline scoring implementation while preserving this structure and returning scores from 0 to 100.
+
+Coordinate changes to model inputs, scoring interfaces and response schemas with the backend lead before merging.
+
+**Scientific limitation:** The current pipeline stores NDVI statistics in `spectral_signature`. NDVI is not mineralogical composition. A reliable mineralogical comparison requires compatible mineralogical or spectral features from both planetary targets and Earth analogs.
+
+### 4. 3D Globe Integration
+
+Database geometries use PostGIS `geometry(Point, 4326)`.
+
+The API returns coordinates as:
+
+```json
+{
+  "lat": 36.1,
+  "lng": -117.0
+}
+```
+
+GeoJSON requires longitude first and latitude second:
+
+```javascript
+const feature = {
+  type: "Feature",
+  geometry: {
+    type: "Point",
+    coordinates: [
+      analog.coordinates.lng,
+      analog.coordinates.lat
+    ]
+  },
+  properties: {
+    site_id: analog.site_id,
+    name: analog.name,
+    similarity_score: analog.similarity_score
+  }
+};
+```
+
+The globe module can use these coordinates to position Earth-analog markers.
+
+The backend currently provides point coordinates, not dedicated terrain tiles, raster overlays or 3D mesh endpoints.
+
+### 5. Raster Data Ingestion
+
+Processing modules:
+
+- `app/services/ingestion.py`
+- `app/services/geospatial.py`
+- `app/services/pipeline.py`
+
+The `ingest_raster_analog()` function accepts a DEM GeoTIFF, red-band GeoTIFF, NIR-band GeoTIFF and site metadata.
+
+It calculates elevation statistics, terrain slope and NDVI, then inserts or updates an Earth-analog record in PostGIS.
+
+**Input requirements:**
+
+- DEM must have a valid CRS and usable dimensions.
+- Red and NIR rasters must have matching CRS, dimensions and transforms.
+- Red and NIR values must be compatible reflectance values.
+- DEM elevation values are currently assumed to be in metres.
+
+The ingestion function is a Python service, not a public HTTP upload endpoint. Raster files must be accessible to the Python process inside the API container.
+
+Example usage:
+
+```python
+from app.db.session import get_session_factory
+from app.services.pipeline import ingest_raster_analog
+
+db = get_session_factory()()
+
+try:
+    result = ingest_raster_analog(
+        db=db,
+        dem_path="/data/dem.tif",
+        red_path="/data/red.tif",
+        nir_path="/data/nir.tif",
+        site_id="earth-site-001",
+        site_name="Example Analog Site",
+        country="Example Country",
+        primary_rock="Basalt",
+        data_source="team_dataset"
+    )
+    print(result)
+finally:
+    db.close()
+```
+
+The `/data` paths are illustrative. Files must first be made accessible inside the container.
+
+Automatic NASA/ESA dataset downloading is not implemented in the current pipeline.
+
+### 6. Database Integration
+
+Main tables:
+
+- `planetary_targets`: Moon and Mars target profiles.
+- `earth_analog_tiles`: Earth analog locations and processed attributes.
+
+Both use EPSG:4326 point geometries and spatial GiST indexes.
+
+Database operations are organized in `app/db/repository.py`. Connection configuration is managed through `DATABASE_URL`.
+
+Coordinate changes to shared tables and schemas with the backend lead before merging.
+
+### 7. Integration Workflow
+
+1. Start the backend using Docker Compose.
+2. Verify `/api/v1/health`.
+3. Inspect endpoints at `/docs`.
+4. Connect the frontend to target and analog-search endpoints.
+5. Connect the globe using returned coordinates.
+6. Coordinate the ML scoring interface.
+7. Import compatible Earth-analog datasets.
+8. Run backend tests after integration changes.
+
+Run tests with:
 
 ```powershell
-cd backend
-docker compose up --build -d
+docker compose exec api python -m pytest -v
 ```
 
-A frontend on `http://localhost:3000` or `http://localhost:5173` can use `http://localhost:8000`. Do not commit `.env`, and change development credentials before any nonlocal deployment.
+### 8. Current Implementation Limitations
 
-## Next work after Milestone 1
+- Seeded records are synthetic demo data, not validated scientific observations.
+- DEM and NDVI processing has been tested using synthetic raster files.
+- Automatic NASA/ESA dataset discovery and downloading is not implemented.
+- Similarity scoring is a deterministic baseline, not a validated scientific model.
+- Mineralogical spectral comparison requires additional compatible features.
+- Raster ingestion is currently a Python service, not a public upload endpoint.
+- Terrain mesh generation and visualization-tile endpoints are not implemented.
 
-1. Verify live PostGIS data connection and the GiST index.
-2. Build ingestion commands for real SRTM DEM and optical satellite assets with source/provenance metadata.
-3. Add validated `EarthTileFeature` extraction and geographically indexed candidate queries for Module 4.
-4. Add a supported planetary coordinate representation instead of reusing Earth's EPSG:4326 for Moon/Mars coordinates.
-5. Wire real Module 4 scorer and add Docker-backed integration tests.
+These limitations should be considered when interpreting results and integrating scientific datasets.

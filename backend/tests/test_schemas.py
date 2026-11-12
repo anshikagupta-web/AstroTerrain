@@ -1,30 +1,16 @@
 import pytest
 from pydantic import ValidationError
+from app.schemas.search import AnalogSearchRequest, SearchWeights
 
-from app.schemas.search import AnalogSearchRequest, AnalogSiteResult
+def test_default_search_request_is_valid():
+    req = AnalogSearchRequest(target_planet="moon", target_site_id="shackleton-crater")
+    assert req.weights.topography == .4
+    assert req.constraints.limit == 20
 
-
-def test_constraints_are_optional():
-    req = AnalogSearchRequest.model_validate(
-        {
-            "target_planet": "mars",
-            "target_site_id": "mars_jezero",
-            "weights": {"topography": 0.4, "geochemistry": 0.4, "climate": 0.2},
-        }
-    )
-    assert req.constraints is None
-
-
-def test_coordinates_are_bounded():
+def test_zero_weights_are_rejected():
     with pytest.raises(ValidationError):
-        AnalogSiteResult.model_validate(
-            {
-                "site_id": "test",
-                "name": "test",
-                "country": "test",
-                "coordinates": {"lat": 91, "lng": 0},
-                "similarity_score": 50,
-                "breakdown": {"topography_match": 50, "geochemistry_match": 50, "climate_match": 50},
-                "metadata": {"elevation_m": 0, "primary_rock": "test", "accessibility_rating": "test"},
-            }
-        )
+        SearchWeights(topography=0, geochemistry=0, climate=0)
+
+def test_unknown_planet_is_rejected():
+    with pytest.raises(ValidationError):
+        AnalogSearchRequest(target_planet="venus", target_site_id="x")
