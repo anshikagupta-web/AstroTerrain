@@ -1,68 +1,82 @@
-"""Database access layer: parameterized SQL; no scientific scoring here."""
-
 import json
-from dataclasses import dataclass
 from typing import Any
-
-from fastapi import Depends
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
-from app.db.session import get_session
+def get_target(db: Session, planet: str, site_id: str) -> dict[str, Any] | None:
+    q = text("""
+        SELECT planet, site_id, site_name, ST_Y(geom) AS lat, ST_X(geom) AS lng,
+               avg_slope_deg, elevation_m, regolith_composition, primary_rock,
+               temp_range_c, data_source
+        FROM planetary_targets WHERE planet=:planet AND site_id=:site_id LIMIT 1
+    """)
+    row = db.execute(q, {"planet": planet, "site_id": site_id}).mappings().first()
+    return dict(row) if row else None
 
+def list_targets(db: Session, planet: str | None = None) -> list[dict[str, Any]]:
+    q = text("""
+        SELECT planet, site_id, site_name, ST_Y(geom) AS lat, ST_X(geom) AS lng,
+               avg_slope_deg, elevation_m, primary_rock, temp_range_c, data_source
+        FROM planetary_targets WHERE (:planet IS NULL OR planet=:planet)
+        ORDER BY planet, site_name
+    """)
+    return [dict(row) for row in db.execute(q, {"planet": planet}).mappings().all()]
 
-@dataclass(frozen=True)
-class TargetRecord:
-    id: str
-    name: str
-    body: str
+def list_earth_analogs(db: Session, subterranean_only: bool) -> list[dict[str, Any]]:
+    q = text("""
+        SELECT site_id, site_name, country, ST_Y(geom) AS lat, ST_X(geom) AS lng,
+               elevation_m, slope_deg, spectral_signature, primary_rock,
+               temp_min_c, temp_max_c, accessibility_score, is_subterranean, data_source
+        FROM earth_analog_tiles
+        WHERE is_active=TRUE AND (:subterranean_only=FALSE OR is_subterranean=TRUE)
+        ORDER BY site_name
+    """)
+    return [dict(row) for row in db.execute(q, {"subterranean_only": subterranean_only}).mappings().all()]
 
+def upsert_earth_analog(db: Session, record: dict[str, Any]) -> dict[str, Any]:
+    """Insert or update an Earth analog record in PostGIS."""
 
-class AnalogRepository:
-    def __init__(self, session: AsyncSession):
-        self.session = session
-
-    async def get_target(self, target_id: str) -> TargetRecord | None:
-        result = await self.session.execute(
-            text("SELECT id, name, body FROM planetary_targets WHERE id = :id"),
-            {"id": target_id},
+    query = text("""
+        INSERT INTO earth_analog_tiles (
+            site_id, site_name, country, geom,
+            elevation_m, slope_deg, ndvi, spectral_signature,
+            primary_rock, temp_min_c, temp_max_c,
+            accessibility_score, is_subterranean, data_source
         )
-        row = result.mappings().first()
-        return TargetRecord(**row) if row else None
-
-    async def list_targets(self) -> list[dict[str, str]]:
-        result = await self.session.execute(
-            text("SELECT id, name, body FROM planetary_targets ORDER BY body, name")
+        VALUES (
+            :site_id, :site_name, :country,
+            ST_SetSRID(ST_MakePoint(:lng, :lat), 4326),
+            :elevation_m, :slope_deg, :ndvi,
+            CAST(:spectral_signature AS JSONB),
+            :primary_rock, :temp_min_c, :temp_max_c,
+            :accessibility_score, :is_subterranean, :data_source
         )
-        return [dict(row) for row in result.mappings().all()]
+        ON CONFLICT (site_id) DO UPDATE SET
+            site_name = EXCLUDED.site_name,
+            country = EXCLUDED.country,
+            geom = EXCLUDED.geom,
+            elevation_m = EXCLUDED.elevation_m,
+            slope_deg = EXCLUDED.slope_deg,
+            ndvi = EXCLUDED.ndvi,
+            spectral_signature = EXCLUDED.spectral_signature,
+            primary_rock = EXCLUDED.primary_rock,
+            temp_min_c = EXCLUDED.temp_min_c,
+            temp_max_c = EXCLUDED.temp_max_c,
+            accessibility_score = EXCLUDED.accessibility_score,
+            is_subterranean = EXCLUDED.is_subterranean,
+            data_source = EXCLUDED.data_source,
+            is_active = TRUE,
+            updated_at = NOW()
+        RETURNING site_id, site_name, ST_Y(geom) AS lat,
+                  ST_X(geom) AS lng, data_source
+    """)
 
-    async def has_earth_tiles(self) -> bool:
-        result = await self.session.execute(
-            text("SELECT EXISTS (SELECT 1 FROM earth_analog_tiles) AS has_tiles")
-        )
-        return bool(result.scalar_one())
+    params = {
+        **record,
+        "spectral_signature": json.dumps(
+            record.get("spectral_signature") or {}
+        ),
+    }
 
-    async def earth_geojson(self, limit: int) -> dict[str, Any]:
-        result = await self.session.execute(
-            text(
-                "SELECT id, site_name, country, ST_AsGeoJSON(location) AS geom "
-                "FROM earth_analog_tiles WHERE location IS NOT NULL "
-                "ORDER BY id LIMIT :limit"
-            ),
-            {"limit": limit},
-        )
-        features = []
-        for row in result.mappings().all():
-            features.append(
-                {
-                    "type": "Feature",
-                    "id": row["id"],
-                    "geometry": json.loads(row["geom"]),
-                    "properties": {"site_id": row["id"], "name": row["site_name"], "country": row["country"]},
-                }
-            )
-        return {"type": "FeatureCollection", "features": features}
-
-
-async def get_repository(session: AsyncSession = Depends(get_session)) -> AnalogRepository:
-    return AnalogRepository(session)
+    result = db.execute(query, params).mappings().one()
+    return dict(result)
