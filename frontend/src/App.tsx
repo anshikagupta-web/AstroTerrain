@@ -31,6 +31,11 @@ type Analog = {
 
 type Health = { status: string; database?: string };
 
+const FALLBACK_TARGETS: Target[] = [
+  { planet: "moon", site_id: "shackleton-crater", site_name: "Shackleton Crater", coordinates: { lat: -89.9, lng: 0 }, avg_slope_deg: null, elevation_m: null, primary_rock: null, temp_range_c: null, data_source: "offline" },
+  { planet: "mars", site_id: "jezero-crater", site_name: "Jezero Crater", coordinates: { lat: 18.38, lng: 77.58 }, avg_slope_deg: null, elevation_m: null, primary_rock: null, temp_range_c: null, data_source: "offline" },
+];
+
 const SEARCH_BODY = {
   weights: { topography: 0.4, geochemistry: 0.35, climate: 0.25 },
   constraints: { subterranean_only: false, min_similarity: 0, limit: 20 },
@@ -134,7 +139,7 @@ function Landing({
         <h1>Earth is our<br/><em>testing ground.</em></h1>
         <p>Find the places on Earth that behave like another world. Compare terrain, climate, and chemistry using the analog search API.</p>
         <button className="launch-cta" onClick={onLaunch} disabled={!target}><span>Begin mission</span><i><Icon name="arrow" size={21}/></i></button>
-        {error && <p className="api-note">{error}</p>}
+        {error && <p className="api-note">Backend is offline, so analog scores are unavailable. The globes still open.</p>}
       </div>
       <div className={`orbital-display ${planet === "mars" ? "mars" : ""}`}>
         <div className="orbit-ring ring-one"/><div className="orbit-ring ring-two"/><div className="orbit-ring ring-three"/>
@@ -314,8 +319,8 @@ function Dashboard({ target, targets, onHome, onTargetChange }: { target: Target
 
 export default function App() {
   const [view, setView] = useState<"landing" | "warp" | "dashboard">("landing");
-  const [targets, setTargets] = useState<Target[]>([]);
-  const [target, setTarget] = useState<Target | null>(null);
+  const [targets, setTargets] = useState<Target[]>(FALLBACK_TARGETS);
+  const [target, setTarget] = useState<Target | null>(FALLBACK_TARGETS[0]);
   const [health, setHealth] = useState<Health | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -329,7 +334,7 @@ export default function App() {
         setTargets(list);
         setTarget((current) => current ?? list.find((item) => item.planet === "moon") ?? list[0] ?? null);
       })
-      .catch((reason) => { if (!cancelled) setError(errorText(reason)); });
+      .catch(() => { if (!cancelled) setError("offline"); });
     return () => { cancelled = true; };
   }, []);
 
