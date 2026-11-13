@@ -187,6 +187,10 @@
 
 body:has(.figma-app){background:#0b1026;color:#a0beff;overflow-x:hidden}
 
+.planet-view,.earth-view{position:absolute;inset:0;z-index:1;touch-action:none}
+.planet-view canvas,.earth-view canvas{display:block;width:100%;height:100%}
+.orbital-display .orbit-ring,.orbital-display .crosshair,.orbital-display .planet-scan,.orbital-display .orbit-label,.globe-orbit{pointer-events:none}
+.orbital-display .target-readout{z-index:3;pointer-events:none}
 .api-note{margin-top:18px;max-width:460px;color:#f2e8c9;font-size:12px;line-height:1.5}
 .launch-cta:disabled,.btn:disabled{opacity:.45;cursor:not-allowed;transform:none}
 .selector-empty{margin:0;align-self:center;font:500 8px "JetBrains Mono";letter-spacing:.12em;color:#a0beff}

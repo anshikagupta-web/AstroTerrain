@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import "./index.css";
 import { ApiError, getHealth, getTargets, searchAnalogs } from "./api.js";
+import { EarthView, PlanetView } from "./Globe.jsx";
 
 type IconName = "orbit" | "arrow" | "layers" | "download" | "target" | "cube" | "scan" | "plus" | "minus" | "chevron";
 type Planet = "moon" | "mars";
@@ -76,17 +77,6 @@ function errorText(error: unknown) {
   return "Something went wrong while talking to the API.";
 }
 
-function project(lat: number, lng: number) {
-  const phi = (lat * Math.PI) / 180;
-  const lambda = ((lng + 90) * Math.PI) / 180;
-  const phi0 = (8 * Math.PI) / 180;
-  const cosC = Math.sin(phi0) * Math.sin(phi) + Math.cos(phi0) * Math.cos(phi) * Math.cos(lambda);
-  if (cosC < 0.08) return null;
-  const x = Math.cos(phi) * Math.sin(lambda);
-  const y = Math.cos(phi0) * Math.sin(phi) - Math.sin(phi0) * Math.cos(phi) * Math.cos(lambda);
-  return { left: `${50 + x * 28}%`, top: `${50 - y * 28}%` };
-}
-
 function pinLabel(site: Analog, layer: Layer) {
   if (layer === "topography") return `${Math.round(site.breakdown.topography_match)}%`;
   if (layer === "climate") return `${Math.round(site.breakdown.climate_match)}%`;
@@ -149,7 +139,7 @@ function Landing({
       <div className={`orbital-display ${planet === "mars" ? "mars" : ""}`}>
         <div className="orbit-ring ring-one"/><div className="orbit-ring ring-two"/><div className="orbit-ring ring-three"/>
         <div className="crosshair horizontal"/><div className="crosshair vertical"/>
-        <div className="display-planet"/>
+        <PlanetView body={planet === "mars" ? "mars" : "moon"} />
         <div className="planet-scan"/>
         <span className="orbit-label label-a">{planet === "mars" ? "MARS" : "MOON"}</span>
         <span className="orbit-label label-b">{target ? `${formatNumber(target.elevation_m, " M")}` : "NO TARGET"}</span>
@@ -215,13 +205,15 @@ function Dashboard({ target, targets, onHome, onTargetChange }: { target: Target
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [report, setReport] = useState(false);
-  const [zoom, setZoom] = useState(1);
+  const earthRef = useRef<{ zoomBy: (factor: number) => void; reset: () => void } | null>(null);
   const selected = analogs.find((site) => site.site_id === selectedId) ?? null;
-  const visible = analogs.flatMap((site) => {
-    const point = project(site.coordinates.lat, site.coordinates.lng);
-    return point ? [{ site, point }] : [];
-  });
-  const hidden = analogs.filter((site) => !project(site.coordinates.lat, site.coordinates.lng));
+  const markers = useMemo(() => analogs.map((site) => ({
+    id: site.site_id,
+    name: site.name.toUpperCase(),
+    lat: site.coordinates.lat,
+    lng: site.coordinates.lng,
+    badge: pinLabel(site, layer),
+  })), [analogs, layer]);
   const high = analogs.filter((site) => site.similarity_score >= 75).length;
 
   useEffect(() => {
@@ -270,20 +262,15 @@ function Dashboard({ target, targets, onHome, onTargetChange }: { target: Target
         <b>Explore candidate terrain</b>
         <small>{loading ? "Searching analogs…" : error ? error : "Select a signal to descend to site level"}</small>
       </div>
-      <div className="globe-wrap is-live" style={{ transform: `translate(-50%, -50%) scale(${zoom})` }}>
+      <div className="globe-wrap is-live">
         <div className="globe-orbit orbit-a"/><div className="globe-orbit orbit-b"/>
-        <div className="earth-globe"><div className="earth-texture"/><div className="earth-atmosphere"/></div>
-        {visible.map(({ site, point }) => (
-          <button key={site.site_id} className={`globe-pin${selectedId === site.site_id ? " is-selected" : ""}`} style={point} onClick={() => setSelectedId(site.site_id)}>
-            <i/><span>{site.name.toUpperCase()} <b>{pinLabel(site, layer)}</b></span>
-          </button>
-        ))}
+        <EarthView ref={earthRef} markers={markers} selectedId={selectedId} onSelect={setSelectedId} />
       </div>
       <div className="globe-tools">
-        <button aria-label="Zoom in" onClick={() => setZoom((value) => Math.min(1.35, Number((value + 0.08).toFixed(2))))}><Icon name="plus"/></button>
-        <button aria-label="Zoom out" onClick={() => setZoom((value) => Math.max(0.8, Number((value - 0.08).toFixed(2))))}><Icon name="minus"/></button>
+        <button aria-label="Zoom in" onClick={() => earthRef.current?.zoomBy(0.82)}><Icon name="plus"/></button>
+        <button aria-label="Zoom out" onClick={() => earthRef.current?.zoomBy(1.22)}><Icon name="minus"/></button>
         <i/>
-        <button aria-label="Reset view" onClick={() => setZoom(1)}><Icon name="scan"/></button>
+        <button aria-label="Reset view" onClick={() => earthRef.current?.reset()}><Icon name="scan"/></button>
         <button aria-label="Map layers" onClick={() => setLayer((current) => current === "similarity" ? "topography" : current === "topography" ? "mineralogy" : current === "mineralogy" ? "climate" : "similarity")}><Icon name="layers"/></button>
       </div>
       <div className="layer-rail" role="radiogroup" aria-label="Data layers">
@@ -292,10 +279,9 @@ function Dashboard({ target, targets, onHome, onTargetChange }: { target: Target
           <button key={item} className={layer === item ? "active" : ""} role="radio" aria-checked={layer === item} onClick={() => setLayer(item)}><i/> {item[0].toUpperCase() + item.slice(1)}</button>
         ))}
       </div>
-      {hidden.length > 0 && <div className="far-side">{hidden.map((site) => <button key={site.site_id} onClick={() => setSelectedId(site.site_id)}>{site.name} · far side</button>)}</div>}
       {!loading && !error && analogs.length === 0 && <p className="globe-empty">No analogs matched this target.</p>}
-      <div className="globe-compass"><span>N</span><i/><b>2D</b></div>
-      <div className="globe-readout mono"><span>ZOOM {zoom.toFixed(2)}</span><span>LAYER {layer.toUpperCase()}</span><span>{analogs.length} RESULTS</span></div>
+      <div className="globe-compass"><span>N</span><i/><b>3D</b></div>
+      <div className="globe-readout mono"><span>DRAG TO ORBIT</span><span>LAYER {layer.toUpperCase()}</span><span>{analogs.length} RESULTS</span></div>
       <div className="candidate-strip">
         <span><b>{String(analogs.length).padStart(2, "0")}</b> ANALOG SITES</span>
         <span><b>{String(high).padStart(2, "0")}</b> HIGH CONFIDENCE</span>
