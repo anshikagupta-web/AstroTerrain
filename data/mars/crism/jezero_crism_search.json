@@ -1,0 +1,20 @@
+{
+    "ODEResults":  {
+                       "Products":  "No Products Found",
+                       "QuerySummary":  {
+                                            "Date":  "2026-11-14T03:05:53.488",
+                                            "easternlon":  "78",
+                                            "limit":  "100",
+                                            "loc":  "f",
+                                            "maxlat":  "18.8",
+                                            "minlat":  "18",
+                                            "output":  "JSON",
+                                            "query":  "PRODUCT",
+                                            "Query_Elapsed_Time":  "00:00:02.9913182",
+                                            "results":  "OPMFT",
+                                            "target":  "mars",
+                                            "westernlon":  "77.2"
+                                        },
+                       "Status":  "Success"
+                   }
+}
