@@ -170,7 +170,6 @@ function Landing({
         ))}
       </div>
     </section>
-    <footer><span>NASA SPACE APPS / 2025</span><span className="mono">API /api/v1</span><span>SELECT A TARGET TO EXPLORE</span></footer>
   </main>;
 }
 
