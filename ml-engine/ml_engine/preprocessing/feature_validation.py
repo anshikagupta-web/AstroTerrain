@@ -281,6 +281,18 @@ def validate_target_features(
                     f"{r.feature_name} is {r.quality.value} ({r.message})"
                 )
 
+    target_meas_type = raw.get("temp_measurement_type")
+    if not target_meas_type or target_meas_type == "unknown":
+        ds = str(raw.get("data_source", "")).lower()
+        if "meda" in ds:
+            target_meas_type = "ground_surface"
+        elif "diviner" in ds:
+            target_meas_type = "spatial_extremes_surface" if planet == Planet.MOON else "ground_surface"
+        elif "themis" in ds or "hirise" in ds or "kaguya" in ds:
+            target_meas_type = "ground_surface"
+        else:
+            target_meas_type = "unknown"
+
     target = PlanetaryTarget(
         planet=planet,
         site_id=site_id,
@@ -292,6 +304,7 @@ def validate_target_features(
         regolith_composition=_get_valid_dict(reports, "regolith_composition"),
         primary_rock=_get_valid_string(reports, "primary_rock"),
         temp_range_c=temp_tuple,
+        temp_measurement_type=target_meas_type,
         data_source=raw.get("data_source", "unknown"),
         feature_reports=reports,
     )
@@ -361,6 +374,14 @@ def validate_candidate_features(
     if tmin is not None and tmax is not None and tmin > tmax:
         tmin, tmax = tmax, tmin
 
+    cand_meas_type = raw.get("temp_measurement_type")
+    if not cand_meas_type or cand_meas_type == "unknown":
+        ds = str(raw.get("data_source", "")).lower()
+        if "nasa_power" in ds:
+            cand_meas_type = "air_2m"
+        else:
+            cand_meas_type = "unknown"
+
     candidate = EarthCandidate(
         site_id=site_id,
         site_name=site_name,
@@ -374,6 +395,7 @@ def validate_candidate_features(
         primary_rock=_get_valid_string(reports, "primary_rock"),
         temp_min_c=tmin,
         temp_max_c=tmax,
+        temp_measurement_type=cand_meas_type,
         accessibility_score=_get_valid_float(reports, "accessibility_score"),
         is_subterranean=bool(raw.get("is_subterranean", False)),
         data_source=raw.get("data_source", "unknown"),

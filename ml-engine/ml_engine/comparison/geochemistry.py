@@ -221,11 +221,11 @@ def compare_geochemistry(
             method = mineral_method
     elif rock_score is not None:
         final = rock_score
-        method = f"Rock-type only (no mineral data): {rock_method}"
+        method = f"Literature-derived categorical rock classification (no quantitative mineral data): {rock_method}"
         warnings.append(
-            "Geochemistry score is based solely on rock-type categorical "
-            "match.  Mineral composition data would significantly improve "
-            "this comparison."
+            "Geochemistry score is based solely on literature-derived categorical "
+            "rock classification, not quantitative mineralogical observations. "
+            "Calibrated mineral reflectance spectra are required for quantitative mineral comparison."
         )
     else:
         return DimensionResult(

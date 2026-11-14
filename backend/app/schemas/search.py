@@ -1,4 +1,4 @@
-from typing import Literal
+from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from app.schemas.common import Coordinates
 
@@ -38,6 +38,10 @@ class AnalogMetadata(BaseModel):
     elevation_m: float | None = None
     primary_rock: str | None = None
     accessibility_rating: str
+    data_source: str | None = None
+    unavailable_dimensions: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    is_complete: bool = True
 
 class AnalogResult(BaseModel):
     site_id: str
@@ -47,6 +51,7 @@ class AnalogResult(BaseModel):
     similarity_score: float
     breakdown: SimilarityBreakdown
     metadata: AnalogMetadata
+    ml_engine_metadata: dict[str, Any] | None = None
 
 class AnalogSearchResponse(BaseModel):
     status: Literal["success"] = "success"

@@ -75,6 +75,7 @@ class PlanetaryTarget(BaseModel):
     regolith_composition: dict[str, float] = Field(default_factory=dict)
     primary_rock: str | None = None
     temp_range_c: tuple[float, float] | None = None
+    temp_measurement_type: str = "unknown"
     data_source: str = "unknown"
     feature_reports: list[FeatureReport] = Field(default_factory=list)
 
@@ -99,6 +100,7 @@ class EarthCandidate(BaseModel):
     primary_rock: str | None = None
     temp_min_c: float | None = None
     temp_max_c: float | None = None
+    temp_measurement_type: str = "unknown"
     accessibility_score: float | None = None
     is_subterranean: bool = False
     data_source: str = "unknown"

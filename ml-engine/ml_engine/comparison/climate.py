@@ -28,6 +28,52 @@ from ml_engine.models.schemas import (
 
 TEMP_GAP_SIGMA_C: float = 30.0
 
+# Physical measurement categories
+_AIR_TYPES = frozenset({"air_2m", "air_1.5m", "atmospheric_air"})
+_SURFACE_TYPES = frozenset({
+    "ground_surface", "surface_skin", "spatial_extremes_surface",
+    "bolometric_surface", "kinetic_surface",
+})
+
+
+def _are_temperature_types_incompatible(t_type: str, c_type: str) -> tuple[bool, str]:
+    """Check if temperature measurements represent fundamentally incompatible physical quantities.
+
+    Air temperature (2-metre atmospheric ambient) and ground-surface skin temperature
+    represent distinct physical thermodynamic regimes. In planetary environments with
+    thin or absent atmospheres (Mars, Moon), surface temperatures fluctuate drastically
+    relative to air temperature due to radiative dominance. Comparing them directly
+    without a documented planetary boundary layer model is unphysical.
+    """
+    t_clean = (t_type or "unknown").lower().strip()
+    c_clean = (c_type or "unknown").lower().strip()
+
+    if t_clean in ("unknown", "generic") or c_clean in ("unknown", "generic"):
+        return False, ""
+    if t_clean == c_clean:
+        return False, ""
+
+    if (t_clean in _AIR_TYPES and c_clean in _SURFACE_TYPES) or (
+        t_clean in _SURFACE_TYPES and c_clean in _AIR_TYPES
+    ):
+        reason = (
+            f"Physical measurement type mismatch: Target provides '{t_type}' "
+            f"while Candidate provides '{c_type}'. Directly comparing 2-metre atmospheric air "
+            f"temperature against ground-surface skin temperature without a documented planetary boundary "
+            f"layer conversion model is unphysical."
+        )
+        return True, reason
+
+    if "spatial_extremes" in t_clean or "spatial_extremes" in c_clean:
+        reason = (
+            f"Measurement regime mismatch: One side represents spatial environmental extremes "
+            f"across disparate terrain zones (e.g. lunar PSR floor vs. illuminated rim), "
+            f"not a local point-source diurnal temperature distribution."
+        )
+        return True, reason
+
+    return False, ""
+
 
 def _interval_similarity(
     t_lo: float, t_hi: float,
@@ -89,6 +135,26 @@ def compare_climate(
     )
 
     if has_target and has_cand:
+        incompatible, mismatch_reason = _are_temperature_types_incompatible(
+            target.temp_measurement_type, candidate.temp_measurement_type
+        )
+        if incompatible:
+            warnings.append(
+                f"Climate comparison unavailable: {mismatch_reason}"
+            )
+            return DimensionResult(
+                dimension="climate",
+                status=DimensionStatus.UNAVAILABLE,
+                features_compared=[],
+                features_missing=["compatible_temperature_measurement"],
+                methodology=(
+                    f"Climate comparison excluded due to physical measurement mismatch: "
+                    f"Target temperature is '{target.temp_measurement_type}', Candidate is '{candidate.temp_measurement_type}'. "
+                    f"Direct cross-comparison without an atmospheric boundary layer model is unphysical."
+                ),
+                warnings=warnings,
+            )
+
         assert target.temp_range_c is not None
         t_lo, t_hi = target.temp_range_c
         c_lo = candidate.temp_min_c

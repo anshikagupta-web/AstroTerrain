@@ -195,6 +195,7 @@ def score_analog(
             "dimensions_computed": result.dimensions_computed,
             "dimensions_unavailable": result.dimensions_unavailable,
             "unavailable_dimensions": unavailable_dims,
+            "effective_weights": {d.dimension: round(d.weight_effective, 4) for d in result.dimensions},
             "warnings": result.warnings,
             "explanation": explanation.model_dump(),
         },
