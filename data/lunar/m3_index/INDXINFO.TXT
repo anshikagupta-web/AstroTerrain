@@ -1,0 +1,25 @@
+PDS_VERSION_ID        = PDS3                                                  
+RECORD_TYPE           = STREAM                                                
+                                                                              
+OBJECT                = TEXT                                                  
+  PUBLICATION_DATE    = 2011-11-30                                            
+  NOTE                = "Description of contents of INDEX directory"          
+END_OBJECT            = TEXT                                                  
+END                                                                           
+                                                                              
+                                                                              
+The INDEX directory contains an index file for locating products in the       
+DATA directory of this archive.                                               
+                                                                              
+                                                                              
+INDXINFO.TXT                                                                  
+- The file you are reading now.                                               
+                                                                              
+INDEX.TAB                                                                     
+INDEX.LBL                                                                     
+- This is the PDS-required, ASCII index table and detached label that         
+  identifies the  location of each data file in this data set.  Each row      
+  in INDEX.TAB consists of a set of fixed-width fields delimited by commas.   
+  Character fields are enclosed in double quotation marks (").                
+                                                                              
+                                                                              
