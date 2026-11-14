@@ -1,31 +1,50 @@
 """Topographical similarity comparison.
 
-Compares elevation, slope, and terrain characteristics between a
-planetary target and an Earth candidate.
+Compares terrain characteristics between a planetary target and an Earth
+candidate using datum-invariant geometric slope analysis.
 
-Methodology
------------
-Individual feature similarities use **Gaussian (exponential-decay)**
-functions calibrated to the physical scale of each feature:
+Scientific Foundation: Geodetic Datum Independence
+---------------------------------------------------
+Planetary elevations are defined relative to fundamentally distinct geodetic datums:
+* **Moon (LRO LOLA):** Arbitrary geometric reference sphere of radius 1,737.4 km.
+* **Mars (MGS MOLA):** Martian Areoid (610.5 Pa equipotential pressure level).
+* **Earth (WGS84/EGM2008):** Mean sea level geoid.
 
-* Maps naturally to [0, 100] without arbitrary cutoffs.
-* The decay rate (*sigma*) is set per-feature based on what constitutes
-  a "significant" difference in planetary science.
-* Handles the full range of possible values gracefully.
+Because these reference zeroes represent completely distinct physical quantities
+(geometric radius vs atmospheric pressure vs gravitational equipotential),
+direct numerical comparison of absolute elevation (|z_t - z_c|) across celestial
+bodies is scientifically invalid:
+- A Martian crater basin at -2,500 m (e.g. Jezero) would suffer a heavy artificial
+  penalty against any dry terrestrial analogue, while falsely matching an abyssal
+  ocean trench on Earth.
+- A lunar crater floor at -3,500 m (e.g. Shackleton) would be similarly distorted.
 
-Default sigma values:
-* **Elevation**: sigma = 2 000 m  (a 2 km difference -> ~60.65% similarity).
-* **Slope**: sigma = 5.0 deg  (a 5 deg difference -> ~60.65% similarity).
+In contrast, **geometric slope angle** (theta = arctan(||grad z||)) is the spatial
+derivative of elevation over horizontal distance. Any constant vertical datum offset
+strictly cancels out (grad(z + C) = grad z). Slope is 100% universal and transferable,
+directly governing rover trafficability, geotechnical stability, and solar illumination.
 
-Scientific Note on Planetary Elevation Datums:
-Planetary elevations are defined relative to specific celestial datums:
-- Moon: Reference sphere of radius 1,737.4 km (LOLA).
-- Mars: Martian areoid / 610.5 Pa equipotential pressure level (MOLA).
-- Earth: Mean sea level / WGS84 geoid (EGM96).
-Because datum references differ fundamentally, geometric slope angle
-serves as the primary universal, transferable topographical metric.
-Absolute datum elevation differences are weighted cautiously (default
-70% slope / 30% elevation).
+Scoring Methodology & Calibration Parameter
+----------------------------------------------
+Topography similarity is evaluated strictly on datum-invariant geometric slope
+using a configurable Gaussian (exponential-decay) function:
+
+    S_slope = 100 * exp(-((target_slope - candidate_slope)^2) / (2 * sigma_slope^2))
+
+**Calibration Notice:**
+The default decay scale ``SLOPE_SIGMA_DEG = 5.0 deg`` (where a 5.0 deg slope difference
+yields ~60.65% similarity) is an **initial configurable calibration parameter**
+derived from planetary rover mobility heuristics (e.g., MSL Curiosity and Mars 2020
+Perseverance traverse constraints, where 5 deg represents a significant shift in wheel slip
+and trafficability). **It is NOT a scientifically validated universal threshold for all
+planetary bodies and landforms.** It can be configured or tuned per investigation via the
+``slope_sigma_deg`` parameter to suit specific mission criteria (e.g. strict rover
+trafficability vs broader geomorphic terrain classification).
+
+Absolute elevation is **excluded** from cross-planetary similarity scoring (weight = 0.0),
+but remains fully tracked and validated for metadata, diagnostic reporting, and
+environmental profiling. Local relief and roughness are reserved as future extensions
+requiring 2D DEM raster ingestion.
 """
 from __future__ import annotations
 
@@ -38,13 +57,15 @@ from ml_engine.models.schemas import (
     PlanetaryTarget,
 )
 
-# Decay parameters -- sigma is the difference at which similarity ~= 60.65%.
-ELEVATION_SIGMA_M: float = 2_000.0
+# Initial configurable calibration parameter for geometric slope (NOT a universal threshold)
 SLOPE_SIGMA_DEG: float = 5.0
 
-# Sub-feature weights within topography (emphasize universal slope over arbitrary datum elevation)
-DEFAULT_SLOPE_WEIGHT: float = 0.70
-DEFAULT_ELEVATION_WEIGHT: float = 0.30
+# Reference dispersion for elevation (retained for backward compatibility / single-body use)
+ELEVATION_SIGMA_M: float = 2_000.0
+
+# Sub-feature weights: slope is the universal active metric; elevation is 0.0 to prevent datum distortion
+DEFAULT_SLOPE_WEIGHT: float = 1.00
+DEFAULT_ELEVATION_WEIGHT: float = 0.00
 
 
 def _gaussian_similarity(a: float, b: float, sigma: float) -> float:
@@ -63,51 +84,68 @@ def compare_topography(
     candidate: EarthCandidate,
     slope_weight: float = DEFAULT_SLOPE_WEIGHT,
     elevation_weight: float = DEFAULT_ELEVATION_WEIGHT,
+    slope_sigma_deg: float = SLOPE_SIGMA_DEG,
 ) -> DimensionResult:
     """Compare topographical features between *target* and *candidate*.
+
+    Evaluates datum-invariant geometric slope angle. Absolute elevation is
+    tracked in metadata and reports, but excluded from cross-planetary scoring
+    (elevation_weight=0.0) to avoid datum distortion.
 
     Args:
         target: Validated planetary target.
         candidate: Validated Earth candidate.
-        slope_weight: Weight given to slope similarity (default 0.70).
-        elevation_weight: Weight given to elevation similarity (default 0.30).
+        slope_weight: Weight given to slope similarity (default 1.00).
+        elevation_weight: Weight given to elevation similarity (default 0.00).
+        slope_sigma_deg: Configurable Gaussian dispersion parameter in degrees
+            (default 5.0 deg). Configurable heuristic parameter, not a universal threshold.
 
     Returns:
-        ``DimensionResult`` with status ``COMPUTED`` when at least
-        one of elevation or slope can be compared, or ``UNAVAILABLE``
-        otherwise.
+        ``DimensionResult`` with status ``COMPUTED`` when slope is available,
+        or ``UNAVAILABLE`` if slope data is missing on either profile.
     """
     features_compared: list[str] = []
     features_missing: list[str] = []
     warnings: list[str] = []
     sub_scores: list[tuple[float, float]] = []  # (score, weight)
 
-    # --- Elevation ---
-    if target.elevation_m is not None and candidate.elevation_m is not None:
-        sim = _gaussian_similarity(
-            target.elevation_m, candidate.elevation_m, ELEVATION_SIGMA_M,
-        )
-        sub_scores.append((sim, elevation_weight))
-        features_compared.append("elevation_m")
-        warnings.append(
-            "Notice: Target and candidate elevations are referenced to distinct "
-            "planetary datums (e.g. lunar 1737.4 km sphere vs Earth geoid). "
-            "Geometric slope angle is the primary transferable topographic metric."
-        )
-    else:
-        features_missing.append("elevation_m")
-        if target.elevation_m is None:
-            warnings.append("Target elevation is not available.")
-        if candidate.elevation_m is None:
-            warnings.append("Candidate elevation is not available.")
+    # --- Elevation (Validation & Informative Metadata Tracking) ---
+    t_elev = target.elevation_m
+    c_elev = candidate.elevation_m
 
-    # --- Slope ---
+    if t_elev is None or c_elev is None:
+        features_missing.append("elevation_m")
+        if t_elev is None:
+            warnings.append("Target elevation is not available.")
+        if c_elev is None:
+            warnings.append("Candidate elevation is not available.")
+    else:
+        # Elevation is available on both profiles.
+        if elevation_weight > 0.0:
+            # Explicit non-default override: caller requested elevation scoring
+            sim_elev = _gaussian_similarity(t_elev, c_elev, ELEVATION_SIGMA_M)
+            sub_scores.append((sim_elev, elevation_weight))
+            features_compared.append("elevation_m")
+            warnings.append(
+                "Notice: Target and candidate elevations are referenced to distinct "
+                "planetary datums. Elevation difference contributed to score per caller override."
+            )
+        else:
+            # Default cross-planetary policy: track elevation in metadata, exclude from scoring
+            warnings.append(
+                "Notice: Target and candidate elevations are referenced to distinct "
+                "planetary datums (e.g. lunar 1737.4 km sphere / Martian areoid vs Earth geoid). "
+                "Absolute elevation is excluded from cross-planetary scoring to prevent geodetic datum mismatch distortion."
+            )
+
+    # --- Geometric Slope (Universal Datum-Invariant Metric) ---
     t_slope = target.avg_slope_deg
     c_slope = candidate.slope_deg
 
     if t_slope is not None and c_slope is not None:
-        sim = _gaussian_similarity(t_slope, c_slope, SLOPE_SIGMA_DEG)
-        sub_scores.append((sim, slope_weight))
+        sim_slope = _gaussian_similarity(t_slope, c_slope, slope_sigma_deg)
+        if slope_weight > 0.0:
+            sub_scores.append((sim_slope, slope_weight))
         features_compared.append("slope_deg")
     else:
         features_missing.append("slope_deg")
@@ -123,23 +161,37 @@ def compare_topography(
             status=DimensionStatus.UNAVAILABLE,
             features_compared=features_compared,
             features_missing=features_missing,
-            methodology="No topographic features available for comparison.",
+            methodology="No valid datum-independent topographic features (slope) available for comparison.",
             warnings=warnings,
         )
 
     total_w = sum(w for _, w in sub_scores)
+    if total_w <= 0:
+        return DimensionResult(
+            dimension="topography",
+            status=DimensionStatus.UNAVAILABLE,
+            features_compared=features_compared,
+            features_missing=features_missing,
+            methodology="All available topographic feature weights sum to zero.",
+            warnings=warnings,
+        )
+
     score = round(sum(s * w for s, w in sub_scores) / total_w, 2)
 
     parts: list[str] = []
     if "slope_deg" in features_compared:
         parts.append(
-            f"Slope (Gaussian sigma={SLOPE_SIGMA_DEG} deg, weight={slope_weight:.2f}): "
+            f"Slope (Gaussian sigma={slope_sigma_deg} deg, weight={slope_weight:.2f}): "
             f"target={t_slope} deg, candidate={c_slope} deg"
         )
-    if "elevation_m" in features_compared:
+    if "elevation_m" in features_compared and elevation_weight > 0.0:
         parts.append(
             f"Elevation (Gaussian sigma={ELEVATION_SIGMA_M}m, weight={elevation_weight:.2f}): "
-            f"target={target.elevation_m}m, candidate={candidate.elevation_m}m"
+            f"target={t_elev}m, candidate={c_elev}m"
+        )
+    elif t_elev is not None and c_elev is not None:
+        parts.append(
+            f"Elevation tracked as metadata (weight=0.00): target={t_elev}m, candidate={c_elev}m"
         )
 
     return DimensionResult(
@@ -148,6 +200,6 @@ def compare_topography(
         status=DimensionStatus.COMPUTED,
         features_compared=features_compared,
         features_missing=features_missing,
-        methodology="Weighted Gaussian similarity. " + "; ".join(parts),
+        methodology="Datum-invariant Gaussian slope similarity. " + "; ".join(parts),
         warnings=warnings,
     )

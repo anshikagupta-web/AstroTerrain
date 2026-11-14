@@ -83,19 +83,107 @@ class TestTopography:
         assert result.status == DimensionStatus.COMPUTED
         assert result.score == 100.0
 
-    def test_moderate_difference(self):
-        t = _make_target(elevation_m=1000, avg_slope_deg=10)
-        c = _make_candidate(elevation_m=3000, slope_deg=15)
+    def test_gaussian_slope_decay_exact_values(self):
+        """Verify Gaussian slope similarity at 0, 5, and 10 degree differences."""
+        # 0 deg difference -> 100.0
+        t0 = _make_target(avg_slope_deg=10.0)
+        c0 = _make_candidate(slope_deg=10.0)
+        assert compare_topography(t0, c0).score == 100.0
+
+        # 5 deg difference (sigma) -> 100 * exp(-0.5) = 60.65
+        t5 = _make_target(avg_slope_deg=10.0)
+        c5 = _make_candidate(slope_deg=15.0)
+        res5 = compare_topography(t5, c5)
+        assert res5.score == 60.65
+
+        # 10 deg difference (2*sigma) -> 100 * exp(-2.0) = 13.53
+        t10 = _make_target(avg_slope_deg=10.0)
+        c10 = _make_candidate(slope_deg=20.0)
+        res10 = compare_topography(t10, c10)
+        assert res10.score == 13.53
+
+    def test_identical_slopes_with_extreme_elevation_differences(self):
+        """Elevation must not penalize cross-planetary analogues with matching slopes."""
+        # Moon floor (-3500 m) vs Earth plateau (+2300 m): Delta z = 5800 m
+        t_moon = _make_target(planet=Planet.MOON, elevation_m=-3500.0, avg_slope_deg=12.5)
+        c_earth = _make_candidate(elevation_m=2300.0, slope_deg=12.5)
+        res_moon = compare_topography(t_moon, c_earth)
+        assert res_moon.status == DimensionStatus.COMPUTED
+        assert res_moon.score == 100.0
+
+        # Mars basin (-2500 m) vs Earth mountain (+1500 m): Delta z = 4000 m
+        t_mars = _make_target(planet=Planet.MARS, elevation_m=-2500.0, avg_slope_deg=6.0)
+        c_mars = _make_candidate(elevation_m=1500.0, slope_deg=6.0)
+        res_mars = compare_topography(t_mars, c_mars)
+        assert res_mars.status == DimensionStatus.COMPUTED
+        assert res_mars.score == 100.0
+
+        # Olympus Mons (+21229 m) vs Mauna Loa (+4169 m): Delta z = 17060 m
+        t_olympus = _make_target(planet=Planet.MARS, elevation_m=21229.0, avg_slope_deg=4.0)
+        c_mauna = _make_candidate(elevation_m=4169.0, slope_deg=4.0)
+        res_olympus = compare_topography(t_olympus, c_mauna)
+        assert res_olympus.status == DimensionStatus.COMPUTED
+        assert res_olympus.score == 100.0
+
+    def test_different_slopes_with_identical_elevations(self):
+        """Identical elevation must not inflate topography score when slopes differ."""
+        t = _make_target(elevation_m=1000.0, avg_slope_deg=10.0)
+        c = _make_candidate(elevation_m=1000.0, slope_deg=15.0)  # 5 deg difference
+        res = compare_topography(t, c)
+        assert res.status == DimensionStatus.COMPUTED
+        # Must reflect slope similarity (60.65), not 100.0 from elevation
+        assert res.score == 60.65
+
+    def test_earth_to_moon_realistic_scenario(self):
+        """Shackleton Crater rim (12.5 deg) compared against various Earth candidates."""
+        t_shackleton = _make_target(
+            planet=Planet.MOON, site_id="shackleton-rim",
+            elevation_m=1200.0, avg_slope_deg=12.5,
+        )
+        # Good match: Atacama ridge with 12.0 deg slope
+        c_good = _make_candidate(elevation_m=2400.0, slope_deg=12.0)
+        res_good = compare_topography(t_shackleton, c_good)
+        assert res_good.score == round(100.0 * math.exp(-(0.5**2) / 50.0), 2)  # ~99.50
+
+        # Poor match: Flat salt flat with 1.0 deg slope (Delta = 11.5 deg)
+        c_flat = _make_candidate(elevation_m=1200.0, slope_deg=1.0)
+        res_flat = compare_topography(t_shackleton, c_flat)
+        assert res_flat.score < 10.0  # Slope mismatch correctly drives score down
+
+    def test_earth_to_mars_realistic_scenario(self):
+        """Jezero delta (6.0 deg) compared against Earth alluvial/deltaic candidates."""
+        t_jezero = _make_target(
+            planet=Planet.MARS, site_id="jezero-delta",
+            elevation_m=-2500.0, avg_slope_deg=6.0,
+        )
+        # Bonneville delta with 5.5 deg slope (Delta = 0.5 deg)
+        c_bonneville = _make_candidate(elevation_m=1280.0, slope_deg=5.5)
+        res = compare_topography(t_jezero, c_bonneville)
+        assert res.score >= 99.0
+
+    def test_missing_target_slope(self):
+        t = _make_target(avg_slope_deg=None)
+        c = _make_candidate(slope_deg=10.0)
         result = compare_topography(t, c)
-        assert result.status == DimensionStatus.COMPUTED
-        assert 0 < result.score < 100
+        assert result.status == DimensionStatus.UNAVAILABLE
+        assert result.score is None
+        assert "slope_deg" in result.features_missing
+
+    def test_missing_candidate_slope(self):
+        t = _make_target(avg_slope_deg=10.0)
+        c = _make_candidate(slope_deg=None)
+        result = compare_topography(t, c)
+        assert result.status == DimensionStatus.UNAVAILABLE
+        assert result.score is None
+        assert "slope_deg" in result.features_missing
 
     def test_missing_target_elevation(self):
-        t = _make_target(elevation_m=None)
-        c = _make_candidate()
+        t = _make_target(elevation_m=None, avg_slope_deg=10.0)
+        c = _make_candidate(slope_deg=10.0)
         result = compare_topography(t, c)
-        # Slope is still available
+        # Slope is available, elevation tracked as missing
         assert result.status == DimensionStatus.COMPUTED
+        assert result.score == 100.0
         assert "elevation_m" in result.features_missing
 
     def test_all_missing(self):
@@ -104,6 +192,27 @@ class TestTopography:
         result = compare_topography(t, c)
         assert result.status == DimensionStatus.UNAVAILABLE
         assert result.score is None
+
+    def test_score_aggregation_with_missing_topography(self):
+        """When topography slope is missing, other dimensions renormalise smoothly."""
+        t = _make_target(
+            avg_slope_deg=None,
+            regolith_composition={"basalt_pct": 40},
+            temp_range_c=(-10.0, 20.0),
+        )
+        c = _make_candidate(
+            slope_deg=None,
+            spectral_signature={"basalt_pct": 40},
+            temp_min_c=-10.0,
+            temp_max_c=20.0,
+        )
+        weights = ComparisonWeights(topography=0.4, geochemistry=0.35, climate=0.25)
+        res = calculate_weighted_similarity(t, c, weights)
+        assert not res.is_complete
+        assert res.dimensions_unavailable == 1
+        assert "topography" in [d.dimension for d in res.dimensions if d.status == DimensionStatus.UNAVAILABLE]
+        # Topography was excluded; overall score is renormalised over geochemistry (97.0) and climate (100.0)
+        assert res.overall_score == 98.25
 
     def test_score_range(self):
         t = _make_target()

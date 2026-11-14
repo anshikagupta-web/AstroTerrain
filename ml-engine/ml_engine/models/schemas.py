@@ -19,6 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 class Planet(str, enum.Enum):
     """Supported planetary bodies."""
+    EARTH = "earth"
     MOON = "moon"
     MARS = "mars"
 

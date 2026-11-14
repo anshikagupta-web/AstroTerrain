@@ -32,14 +32,34 @@ is set to 0.0 and ``insufficient_data`` is flagged in ``ml_engine_metadata``.
 Candidates with insufficient available data will not receive artificial
 scores or falsely rank in search results.
 
-Interface Parity
-----------------
-This adapter also provides:
+Interface Parity & Intentional Scoring Model Enhancements
+---------------------------------------------------------
+This adapter provides 100% signature and schema parity with the backend's
+``app.services.scoring`` functions:
+* ``score_analog(target, analog, weights) -> dict``
 * ``accessibility_rating(score) -> str``
 * ``topography_match(target, analog) -> float``
 * ``geochemistry_match(target, analog) -> float``
 * ``climate_match(target, analog) -> float``
-making it a 100% complete replacement for ``backend/app/services/scoring.py``.
+
+Intentional Mathematical Differences from Backend Baseline:
+1. **Topography Scoring Function:**
+   - *Backend baseline:* Linear piece-wise function ``max(0.0, 100.0 - |Δθ| * 5.0)``.
+     Linear decay with hard cutoff at |Δθ| >= 20 deg.
+   - *ML Engine:* Calibrated Gaussian kernel ``100.0 * exp(-(Δθ^2) / (2 * 5.0^2))``.
+     Both models are identical at exact match (|Δθ| = 0 deg -> 100.0). The Gaussian
+     model provides smooth asymptotic decay without arbitrary cliff cutoffs, and
+     reflects physical robotic trafficability thresholds.
+   - *Elevation:* Absolute elevation is excluded from cross-planetary scoring
+     (weight=0.0) to eliminate geodetic datum mismatch distortion across Earth,
+     Moon, and Mars.
+2. **Missing Data Policy:**
+   - *Backend baseline:* Returned artificial 50.0 fallback for missing data.
+   - *ML Engine:* Returns 0.0 in breakdown and flags ``insufficient_data: True``
+     in metadata, preventing candidates with missing dimensions from falsely ranking.
+3. **Geochemistry & Climate:**
+   - Geochemistry maps non-negative mineral cosine similarity directly into [0, 100].
+   - Climate uses continuous interval overlap with Gaussian gap decay.
 """
 from __future__ import annotations
 

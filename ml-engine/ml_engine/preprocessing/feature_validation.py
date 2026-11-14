@@ -27,14 +27,19 @@ from ml_engine.models.schemas import (
     Planet,
     PlanetaryTarget,
 )
+from ml_engine.preprocessing.normalization import (
+    PLANETARY_ELEVATION_BOUNDS,
+    PLANETARY_TEMP_BOUNDS,
+    normalize_temperature,
+)
 
 # ---------------------------------------------------------------------------
 # Physical range definitions
 # ---------------------------------------------------------------------------
 
-ELEVATION_RANGE_M = (-12_000.0, 30_000.0)
+ELEVATION_RANGE_M = PLANETARY_ELEVATION_BOUNDS["earth"]
 SLOPE_RANGE_DEG = (0.0, 90.0)
-EARTH_TEMP_RANGE_C = (-100.0, 70.0)
+EARTH_TEMP_RANGE_C = PLANETARY_TEMP_BOUNDS["earth"]
 NDVI_RANGE = (-1.0, 1.0)
 ACCESSIBILITY_RANGE = (0.0, 100.0)
 LAT_RANGE = (-90.0, 90.0)
@@ -45,11 +50,11 @@ PLANETARY_ELEVATION_RANGE_M = (-30_000.0, 30_000.0)
 PLANETARY_TEMP_RANGE_C = (-270.0, 500.0)
 
 # Planet-specific physical bounds (Moon vs Mars)
-MOON_TEMP_RANGE_C = (-250.0, 150.0)
-MOON_ELEVATION_RANGE_M = (-12_000.0, 15_000.0)
+MOON_TEMP_RANGE_C = PLANETARY_TEMP_BOUNDS["moon"]
+MOON_ELEVATION_RANGE_M = PLANETARY_ELEVATION_BOUNDS["moon"]
 
-MARS_TEMP_RANGE_C = (-150.0, 40.0)
-MARS_ELEVATION_RANGE_M = (-10_000.0, 25_000.0)
+MARS_TEMP_RANGE_C = PLANETARY_TEMP_BOUNDS["mars"]
+MARS_ELEVATION_RANGE_M = PLANETARY_ELEVATION_BOUNDS["mars"]
 
 
 def _is_finite_number(value: Any) -> bool:
@@ -83,9 +88,11 @@ def _validate_numeric(
             raw_value=fval, normalized_value=None,  # Do not normalize out-of-range value
             message=f"Feature '{name}' value {fval} outside expected range [{low}, {high}].",
         )
+    span = high - low
+    norm_val = round(max(0.0, min(1.0, (fval - low) / span)), 6) if span > 0 else 0.0
     return FeatureReport(
         feature_name=name, quality=DataQuality.VALID,
-        raw_value=fval, normalized_value=fval,
+        raw_value=fval, normalized_value=norm_val,
     )
 
 
@@ -143,7 +150,7 @@ def _get_valid_float(reports: list[FeatureReport], name: str) -> float | None:
     """
     for r in reports:
         if r.feature_name == name and r.quality == DataQuality.VALID:
-            return r.normalized_value
+            return float(r.raw_value) if r.raw_value is not None else None
     return None
 
 
@@ -259,9 +266,10 @@ def validate_target_features(
                 ))
                 temp_tuple = None  # Strictly reject out-of-range temperature from entering profile
             else:
+                norm_mid = normalize_temperature((lo + hi) / 2.0, planet=planet)
                 reports.append(FeatureReport(
                     feature_name="temp_range_c", quality=DataQuality.VALID,
-                    raw_value=temp_raw,
+                    raw_value=temp_raw, normalized_value=norm_mid,
                 ))
                 temp_tuple = (lo, hi)
 
