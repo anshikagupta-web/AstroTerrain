@@ -1,8 +1,9 @@
-from typing import Literal
+﻿from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from app.schemas.common import Coordinates
 
 Planet = Literal["moon", "mars"]
+
 
 class SearchWeights(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -16,11 +17,13 @@ class SearchWeights(BaseModel):
             raise ValueError("At least one similarity weight must be greater than zero.")
         return self
 
+
 class SearchConstraints(BaseModel):
     model_config = ConfigDict(extra="forbid")
     subterranean_only: bool = False
     min_similarity: float = Field(default=50.0, ge=0, le=100)
     limit: int = Field(default=20, ge=1, le=100)
+
 
 class AnalogSearchRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -29,15 +32,18 @@ class AnalogSearchRequest(BaseModel):
     weights: SearchWeights = Field(default_factory=SearchWeights)
     constraints: SearchConstraints = Field(default_factory=SearchConstraints)
 
+
 class SimilarityBreakdown(BaseModel):
-    topography_match: float
-    geochemistry_match: float
-    climate_match: float
+    topography_match: float | None = None
+    geochemistry_match: float | None = None
+    climate_match: float | None = None
+
 
 class AnalogMetadata(BaseModel):
     elevation_m: float | None = None
     primary_rock: str | None = None
     accessibility_rating: str
+
 
 class AnalogResult(BaseModel):
     site_id: str
@@ -46,7 +52,10 @@ class AnalogResult(BaseModel):
     coordinates: Coordinates
     similarity_score: float
     breakdown: SimilarityBreakdown
+    available_features: list[str]
+    feature_coverage: float
     metadata: AnalogMetadata
+
 
 class AnalogSearchResponse(BaseModel):
     status: Literal["success"] = "success"

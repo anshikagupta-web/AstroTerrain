@@ -13,14 +13,32 @@ def get_target(db: Session, planet: str, site_id: str) -> dict[str, Any] | None:
     row = db.execute(q, {"planet": planet, "site_id": site_id}).mappings().first()
     return dict(row) if row else None
 
+
 def list_targets(db: Session, planet: str | None = None) -> list[dict[str, Any]]:
-    q = text("""
-        SELECT planet, site_id, site_name, ST_Y(geom) AS lat, ST_X(geom) AS lng,
-               avg_slope_deg, elevation_m, primary_rock, temp_range_c, data_source
-        FROM planetary_targets WHERE (:planet IS NULL OR planet=:planet)
-        ORDER BY planet, site_name
-    """)
-    return [dict(row) for row in db.execute(q, {"planet": planet}).mappings().all()]
+    if planet is None:
+        q = text("""
+            SELECT planet, site_id, site_name,
+                   ST_Y(geom) AS lat, ST_X(geom) AS lng,
+                   avg_slope_deg, elevation_m, primary_rock,
+                   temp_range_c, data_source
+            FROM planetary_targets
+            ORDER BY planet, site_name
+        """)
+        rows = db.execute(q).mappings().all()
+    else:
+        q = text("""
+            SELECT planet, site_id, site_name,
+                   ST_Y(geom) AS lat, ST_X(geom) AS lng,
+                   avg_slope_deg, elevation_m, primary_rock,
+                   temp_range_c, data_source
+            FROM planetary_targets
+            WHERE planet = :planet
+            ORDER BY planet, site_name
+        """)
+        rows = db.execute(q, {"planet": planet}).mappings().all()
+
+    return [dict(row) for row in rows]
+
 
 def list_earth_analogs(db: Session, subterranean_only: bool) -> list[dict[str, Any]]:
     q = text("""
