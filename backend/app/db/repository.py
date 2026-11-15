@@ -17,7 +17,7 @@ def list_targets(db: Session, planet: str | None = None) -> list[dict[str, Any]]
     q = text("""
         SELECT planet, site_id, site_name, ST_Y(geom) AS lat, ST_X(geom) AS lng,
                avg_slope_deg, elevation_m, primary_rock, temp_range_c, data_source
-        FROM planetary_targets WHERE (:planet IS NULL OR planet=:planet)
+        FROM planetary_targets WHERE (CAST(:planet AS text) IS NULL OR planet=:planet)
         ORDER BY planet, site_name
     """)
     return [dict(row) for row in db.execute(q, {"planet": planet}).mappings().all()]
