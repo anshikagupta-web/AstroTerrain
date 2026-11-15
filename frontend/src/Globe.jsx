@@ -435,11 +435,6 @@ export const PlanetaryGlobe = forwardRef(function PlanetaryGlobe(
   targetsRef.current = targets;
   const selectedRef = useRef(selectedId);
   selectedRef.current = selectedId;
-  const isInitialMount = useRef(true);
-
-  useEffect(() => {
-    isInitialMount.current = true;
-  }, [planet]);
 
   useImperativeHandle(
     ref,
@@ -717,16 +712,12 @@ export const PlanetaryGlobe = forwardRef(function PlanetaryGlobe(
   }, [targets]);
 
   useEffect(() => {
-    if (!selectedId) return;
-    if (isInitialMount.current) {
-      isInitialMount.current = false;
-      return;
-    }
-    const target = targetsRef.current.find((t) => t.site_id === selectedId);
+    if (!selectedId || targets.length === 0) return;
+    const target = targets.find((t) => t.site_id === selectedId);
     if (target && apiRef.current.flyTo) {
       apiRef.current.flyTo(latLngToVector(target.coordinates.lat, target.coordinates.lng, 2.35));
     }
-  }, [selectedId]);
+  }, [selectedId, targets]);
 
   return <div ref={mountRef} className="planet-view" />;
 });
@@ -752,7 +743,6 @@ export const EarthGlobe = forwardRef(function EarthGlobe(
   analogsRef.current = analogs;
   const selectedRef = useRef(selectedId);
   selectedRef.current = selectedId;
-  const isInitialMount = useRef(true);
 
   useImperativeHandle(
     ref,
@@ -1050,16 +1040,12 @@ export const EarthGlobe = forwardRef(function EarthGlobe(
   }, [analogs]);
 
   useEffect(() => {
-    if (!selectedId) return;
-    if (isInitialMount.current) {
-      isInitialMount.current = false;
-      return;
-    }
-    const analog = analogsRef.current.find((a) => a.site_id === selectedId);
+    if (!selectedId || analogs.length === 0) return;
+    const analog = analogs.find((a) => a.site_id === selectedId);
     if (analog && apiRef.current.flyTo) {
       apiRef.current.flyTo(latLngToVector(analog.coordinates.lat, analog.coordinates.lng, 2.35));
     }
-  }, [selectedId]);
+  }, [selectedId, analogs]);
 
   return (
     <div className={`planet-view earth-view ${isSearching ? "is-scanning" : ""}`}>

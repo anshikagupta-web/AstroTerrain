@@ -416,63 +416,152 @@ body:has(.figma-app){background:#0b1026;color:#a0beff;overflow-x:hidden}
   letter-spacing: 0.04em;
 }
 
-/* Crater & Analog Quick-Select Chips */
-.crater-chips-bar {
+/* Compact Single-Line Header Controls for Dual Globe Views */
+.compact-header-controls {
   display: flex;
-  gap: 6px;
-  overflow-x: auto;
+  align-items: center;
+  gap: 10px;
   pointer-events: auto;
-  padding-bottom: 4px;
   max-width: 100%;
-  scrollbar-width: none;
 }
 
-.crater-chips-bar::-webkit-scrollbar {
-  display: none;
+.active-target-selector {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
-.crater-chip {
+.control-label {
+  font: 700 8px "JetBrains Mono";
+  letter-spacing: 0.12em;
+  color: rgba(160, 190, 255, 0.7);
+  white-space: nowrap;
+}
+
+.custom-dropdown-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.compact-select-input {
+  appearance: none;
+  -webkit-appearance: none;
+  background: rgba(11, 16, 38, 0.88);
+  border: 1px solid rgba(85, 199, 232, 0.35);
+  border-radius: 8px;
+  padding: 5px 28px 5px 12px;
+  color: #f2e8c9;
+  font: 600 11px "Plus Jakarta Sans";
+  cursor: pointer;
+  outline: none;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(8px);
+  transition: all 0.2s ease;
+  max-width: 280px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.compact-select-input:hover,
+.compact-select-input:focus {
+  border-color: #55c7e8;
+  background: rgba(26, 42, 79, 0.95);
+  box-shadow: 0 0 12px rgba(85, 199, 232, 0.3);
+}
+
+.compact-select-input option {
+  background: #0b1026;
+  color: #f2e8c9;
+  font-size: 11px;
+}
+
+.dropdown-caret {
+  position: absolute;
+  right: 10px;
+  font-size: 9px;
+  color: #55c7e8;
+  pointer-events: none;
+}
+
+.compact-search-trigger-btn {
   display: flex;
   align-items: center;
   gap: 6px;
-  background: rgba(11, 16, 38, 0.75);
-  border: 1px solid rgba(160, 190, 255, 0.18);
-  border-radius: 20px;
-  padding: 4px 10px;
-  color: rgba(160, 190, 255, 0.75);
-  font: 600 9px "Plus Jakarta Sans";
-  white-space: nowrap;
+  background: rgba(26, 42, 79, 0.65);
+  border: 1px solid rgba(160, 190, 255, 0.22);
+  border-radius: 6px;
+  padding: 5px 10px;
+  color: rgba(160, 190, 255, 0.85);
+  font: 600 9px "JetBrains Mono";
   cursor: pointer;
   transition: all 0.2s ease;
-  backdrop-filter: blur(8px);
+  white-space: nowrap;
 }
 
-.crater-chip:hover {
-  background: rgba(26, 42, 79, 0.85);
-  border-color: rgba(160, 190, 255, 0.4);
-  color: #f2e8c9;
-}
-
-.crater-chip.is-active {
-  background: #1a2a4f;
+.compact-search-trigger-btn:hover {
+  background: rgba(45, 75, 130, 0.85);
   border-color: #55c7e8;
-  color: #f2e8c9;
-  box-shadow: 0 0 12px rgba(85, 199, 232, 0.25);
+  color: #ffffff;
 }
 
-.crater-chip small {
-  font: 500 8px "JetBrains Mono";
-  opacity: 0.75;
+/* Compact Earth Analog Ranks Row */
+.compact-analog-ranks {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  max-width: 100%;
 }
 
-.analog-chip.is-active {
+.rank-pills-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.compact-rank-pill {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: rgba(11, 16, 38, 0.82);
+  border: 1px solid rgba(45, 212, 191, 0.25);
+  border-radius: 14px;
+  padding: 4px 10px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.compact-rank-pill:hover {
+  background: rgba(26, 42, 79, 0.88);
   border-color: #2dd4bf;
-  box-shadow: 0 0 12px rgba(45, 212, 191, 0.3);
 }
 
-.analog-rank {
-  font: 700 7px "JetBrains Mono";
+.compact-rank-pill.is-active {
+  background: rgba(45, 212, 191, 0.18);
+  border-color: #2dd4bf;
+  box-shadow: 0 0 12px rgba(45, 212, 191, 0.35);
+}
+
+.compact-rank-pill .rank-num {
+  font: 700 8px "JetBrains Mono";
   color: #2dd4bf;
+}
+
+.compact-rank-pill .rank-name {
+  font: 600 9px "Plus Jakarta Sans";
+  color: #f2e8c9;
+}
+
+.compact-rank-pill .rank-score {
+  font: 700 8px "JetBrains Mono";
+  color: #2dd4bf;
+  background: rgba(45, 212, 191, 0.15);
+  padding: 1px 4px;
+  border-radius: 3px;
 }
 
 /* Center Matching Bridge */
@@ -1411,58 +1500,202 @@ body:has(.figma-app){background:#0b1026;color:#a0beff;overflow-x:hidden}
   letter-spacing: 0.08em;
 }
 
+/* Navigation Search Bar */
 .nav-search-wrap {
   position: relative;
-  width: 170px;
+  width: 320px;
+  display: flex;
+  align-items: center;
+}
+
+.nav-search-icon {
+  position: absolute;
+  left: 12px;
+  color: rgba(160, 190, 255, 0.6);
+  pointer-events: none;
+  display: flex;
+  align-items: center;
 }
 
 .nav-search-wrap input {
   width: 100%;
-  background: rgba(15, 23, 42, 0.8);
-  border: 1px solid rgba(160, 190, 255, 0.2);
-  border-radius: 16px;
-  padding: 5px 12px;
-  font: 500 10px "Plus Jakarta Sans";
+  background: rgba(11, 16, 38, 0.85);
+  border: 1px solid rgba(160, 190, 255, 0.25);
+  border-radius: 20px;
+  padding: 6px 36px 6px 34px;
+  font: 500 11px "Plus Jakarta Sans";
   color: #f2e8c9;
   outline: none;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  transition: all 0.25s ease;
 }
 
 .nav-search-wrap input:focus {
   border-color: #55c7e8;
-  width: 220px;
+  background: rgba(15, 23, 50, 0.95);
+  box-shadow: 0 0 16px rgba(85, 199, 232, 0.35);
+  width: 380px;
 }
 
-.nav-search-dropdown {
+.nav-search-clear-btn {
   position: absolute;
-  top: 32px;
+  right: 12px;
+  background: transparent;
+  border: none;
+  color: rgba(160, 190, 255, 0.6);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+
+.nav-search-clear-btn:hover {
+  color: #ffffff;
+}
+
+.nav-search-hotkey {
+  position: absolute;
+  right: 10px;
+  font: 700 8px "JetBrains Mono";
+  color: rgba(160, 190, 255, 0.5);
+  background: rgba(160, 190, 255, 0.12);
+  border: 1px solid rgba(160, 190, 255, 0.2);
+  border-radius: 4px;
+  padding: 2px 6px;
+  pointer-events: none;
+}
+
+/* In-Nav Autocomplete Dropdown Menu */
+.nav-search-dropdown-menu {
+  position: absolute;
+  top: 36px;
   left: 0;
-  width: 220px;
+  width: 440px;
+  max-height: 480px;
   background: rgba(11, 16, 38, 0.98);
-  border: 1px solid rgba(160, 190, 255, 0.25);
-  border-radius: 8px;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.8);
+  border: 1px solid rgba(85, 199, 232, 0.3);
+  border-radius: 12px;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.85);
   overflow: hidden;
-  z-index: 100;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  backdrop-filter: blur(14px);
+  animation: fadeIn 0.2s ease;
+}
+
+.search-group-section {
+  display: flex;
+  flex-direction: column;
+}
+
+.search-group-title {
+  padding: 6px 14px;
+  font: 700 8px "JetBrains Mono";
+  letter-spacing: 0.14em;
+  background: rgba(15, 23, 42, 0.8);
+  border-bottom: 1px solid rgba(160, 190, 255, 0.08);
+}
+
+.mars-group-title {
+  color: #ff8c5a;
+  border-left: 3px solid #ff6b35;
+}
+
+.moon-group-title {
+  color: #55c7e8;
+  border-left: 3px solid #55c7e8;
+}
+
+.earth-group-title {
+  color: #2dd4bf;
+  border-left: 3px solid #2dd4bf;
 }
 
 .nav-search-item {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 8px 10px;
-  border-bottom: 1px solid rgba(160, 190, 255, 0.08);
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(160, 190, 255, 0.06);
   cursor: pointer;
-  font-size: 10px;
-  color: #f2e8c9;
+  transition: all 0.15s ease;
 }
 
 .nav-search-item:hover {
-  background: rgba(26, 42, 79, 0.7);
+  background: rgba(26, 42, 79, 0.75);
 }
 
-.nav-search-item small {
-  font: 700 7px "JetBrains Mono";
+.nav-item-left {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.nav-item-left strong {
+  font: 600 11px "Plus Jakarta Sans";
+  color: #f2e8c9;
+}
+
+.nav-item-left small {
+  font: 500 8px "JetBrains Mono";
+  color: rgba(160, 190, 255, 0.65);
+}
+
+.nav-item-right {
+  display: flex;
+  align-items: center;
+}
+
+.nav-match-badge {
+  font: 600 8px "JetBrains Mono";
+  color: #2dd4bf;
+  background: rgba(45, 212, 191, 0.12);
+  border: 1px solid rgba(45, 212, 191, 0.25);
+  border-radius: 4px;
+  padding: 2px 7px;
+  white-space: nowrap;
+}
+
+.earth-badge-match {
   color: #55c7e8;
+  background: rgba(85, 199, 232, 0.12);
+  border-color: rgba(85, 199, 232, 0.25);
+}
+
+.rich-search-dropdown .item-analog-link {
+  color: #2dd4bf;
+  font-weight: 500;
+  margin-left: 4px;
+}
+
+.rich-search-dropdown .item-source-badge {
+  color: rgba(160, 190, 255, 0.7);
+  background: rgba(160, 190, 255, 0.08);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+/* Pulse animation for selected pin on Earth & Moon */
+@keyframes earth-analog-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(45, 212, 191, 0.7), 0 0 10px #2dd4bf;
+  }
+  70% {
+    box-shadow: 0 0 0 14px rgba(45, 212, 191, 0), 0 0 20px #2dd4bf;
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(45, 212, 191, 0), 0 0 10px #2dd4bf;
+  }
+}
+
+.globe-pin.earth-pin.is-selected i {
+  background: #2dd4bf;
+  border-color: #ffffff;
+  animation: earth-analog-pulse 1.8s infinite;
+}
+
+.globe-pin.is-selected {
+  z-index: 25;
 }
 
 @keyframes fadeIn {
@@ -1580,4 +1813,28 @@ body:has(.figma-app){background:#0b1026;color:#a0beff;overflow-x:hidden}
   line-height: 1.12;
   padding-bottom: 0.16em;
   overflow: visible;
+}
+
+.planet.earth {
+  width: 176px;
+  height: 176px;
+  left: -52px;
+  bottom: 7%;
+  opacity: 1;
+  background:
+    radial-gradient(ellipse 34% 12% at 40% 28%, rgba(255, 255, 255, 0.55), transparent 72%),
+    radial-gradient(ellipse 26% 9% at 66% 46%, rgba(255, 255, 255, 0.38), transparent 70%),
+    radial-gradient(ellipse 20% 8% at 28% 64%, rgba(255, 255, 255, 0.28), transparent 72%),
+    radial-gradient(ellipse 13% 30% at 31% 44%, #7ea15a 0 42%, #3f6b3c 62%, transparent 74%),
+    radial-gradient(ellipse 9% 14% at 36% 70%, #6d9448 0 48%, transparent 72%),
+    radial-gradient(ellipse 15% 24% at 57% 48%, #8aa65a 0 28%, #4f7340 46%, #c4a56a 66%, transparent 78%),
+    radial-gradient(ellipse 11% 9% at 54% 30%, #6f8f4c 0 50%, transparent 74%),
+    radial-gradient(ellipse 16% 12% at 73% 40%, #6b8a4a 0 36%, #b89a66 62%, transparent 76%),
+    radial-gradient(circle at 42% 36%, #4ea0dc 0%, #1f6aaf 26%, #0e4578 54%, #082848 78%);
+  box-shadow:
+    inset -38px -18px 36px rgba(4, 14, 32, 0.88),
+    inset 12px 8px 16px rgba(255, 255, 255, 0.16),
+    0 0 0 7px rgba(126, 190, 230, 0.16),
+    0 0 46px rgba(64, 150, 210, 0.38);
+  filter: none;
 }
