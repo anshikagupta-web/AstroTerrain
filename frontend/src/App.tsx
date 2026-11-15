@@ -1,6 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import "./index.css";
-import { getTargets, searchAnalogs, getHealth, FALLBACK_TARGETS_DATA } from "./api.js";
+import {
+  getTargets,
+  searchAnalogs,
+  getHealth,
+  FALLBACK_TARGETS_DATA,
+  REAL_SCIENTIFIC_EARTH_ANALOGS,
+  SITE_ANALOG_MAP,
+  DEFAULT_ANALOGS,
+} from "./api.js";
 import { PlanetaryGlobe, EarthGlobe, CelestialTrinity, PlanetView } from "./Globe.jsx";
 
 type Planet = "moon" | "mars";
@@ -17,6 +25,9 @@ type Target = {
   temp_range_c: number[] | null;
   data_source: string;
   description?: string;
+  top_analog_id?: string;
+  top_analog_name?: string;
+  keywords?: string[];
 };
 
 type Analog = {
@@ -28,6 +39,7 @@ type Analog = {
   breakdown: { topography_match: number; geochemistry_match: number; climate_match: number };
   metadata: { elevation_m: number | null; primary_rock: string | null; accessibility_rating: string };
   rationale?: string;
+  keywords?: string[];
 };
 
 const SEARCH_WEIGHTS = {
@@ -99,9 +111,9 @@ export default function App() {
   const [view, setView] = useState<ViewMode>("landing");
   const [planet, setPlanet] = useState<Planet>("mars");
   const [allTargets, setAllTargets] = useState<Target[]>(FALLBACK_TARGETS_DATA as Target[]);
-  const [selectedTargetId, setSelectedTargetId] = useState<string>("jezero-crater");
+  const [selectedTargetId, setSelectedTargetId] = useState<string>("mars-jezero-real");
   const [analogs, setAnalogs] = useState<Analog[]>([]);
-  const [selectedAnalogId, setSelectedAnalogId] = useState<string | null>(null);
+  const [selectedAnalogId, setSelectedAnalogId] = useState<string | null>("real-analog-hawaii");
   const [autoRotate, setAutoRotate] = useState(true);
   const [loadingAnalogs, setLoadingAnalogs] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -111,6 +123,7 @@ export default function App() {
   const planetGlobeRef = useRef<{ zoomBy: (f: number) => void; reset: () => void; focus?: (lat: number, lng: number) => void } | null>(null);
   const earthGlobeRef = useRef<{ zoomBy: (f: number) => void; reset: () => void; focus?: (lat: number, lng: number) => void } | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const searchContainerRef = useRef<HTMLDivElement>(null);
 
   // Targets for the currently active planet (Moon or Mars)
   const planetTargets = useMemo(() => {
@@ -130,17 +143,56 @@ export default function App() {
     return analogs.find((a) => a.site_id === selectedAnalogId) ?? analogs[0] ?? null;
   }, [analogs, selectedAnalogId]);
 
-  // Search Results across ALL celestial bodies (Moon & Mars)
+  // Comprehensive Search Results across Moon, Mars, and Earth datasets
   const searchResults = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    if (!q) return allTargets;
-    return allTargets.filter(
-      (t) =>
+
+    const moonMatches = allTargets.filter((t) => {
+      if (t.planet !== "moon") return false;
+      if (!q) return true;
+      return (
         t.site_name.toLowerCase().includes(q) ||
         t.site_id.toLowerCase().includes(q) ||
         (t.primary_rock && t.primary_rock.toLowerCase().includes(q)) ||
-        t.planet.toLowerCase().includes(q)
-    );
+        t.data_source.toLowerCase().includes(q) ||
+        (t.keywords && t.keywords.some((k) => k.toLowerCase().includes(q))) ||
+        (t.description && t.description.toLowerCase().includes(q))
+      );
+    });
+
+    const marsMatches = allTargets.filter((t) => {
+      if (t.planet !== "mars") return false;
+      if (!q) return true;
+      return (
+        t.site_name.toLowerCase().includes(q) ||
+        t.site_id.toLowerCase().includes(q) ||
+        (t.primary_rock && t.primary_rock.toLowerCase().includes(q)) ||
+        t.data_source.toLowerCase().includes(q) ||
+        (t.keywords && t.keywords.some((k) => k.toLowerCase().includes(q))) ||
+        (t.description && t.description.toLowerCase().includes(q))
+      );
+    });
+
+    const earthAnalogsList = Object.values(REAL_SCIENTIFIC_EARTH_ANALOGS);
+    const earthMatches = earthAnalogsList.filter((a) => {
+      if (!q) return true;
+      return (
+        a.name.toLowerCase().includes(q) ||
+        a.country.toLowerCase().includes(q) ||
+        a.site_id.toLowerCase().includes(q) ||
+        (a.keywords && a.keywords.some((k) => k.toLowerCase().includes(q))) ||
+        (a.rationale && a.rationale.toLowerCase().includes(q))
+      );
+    });
+
+    const totalCount = moonMatches.length + marsMatches.length + earthMatches.length;
+
+    return {
+      moon: moonMatches,
+      mars: marsMatches,
+      earth: earthMatches,
+      totalCount,
+    };
   }, [allTargets, searchQuery]);
 
   // Initial data loading
@@ -161,6 +213,37 @@ export default function App() {
       .catch(() => {
         // Fallback already preloaded
       });
+  }, []);
+
+  // Keyboard shortcut '/' to open search anytime, Escape to close
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (
+        e.key === "/" &&
+        document.activeElement !== searchInputRef.current &&
+        document.activeElement?.tagName !== "INPUT" &&
+        document.activeElement?.tagName !== "SELECT"
+      ) {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+        setSearchOpen(true);
+      } else if (e.key === "Escape") {
+        setSearchOpen(false);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
+  // Click outside search container to close dropdown
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (searchContainerRef.current && !searchContainerRef.current.contains(e.target as Node)) {
+        setSearchOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
   // Warp screen auto-transition to trinity
@@ -190,6 +273,10 @@ export default function App() {
         setAnalogs(list);
         if (list.length > 0) {
           setSelectedAnalogId(list[0].site_id);
+          // Focus Earth globe immediately on the top analog
+          requestAnimationFrame(() => {
+            earthGlobeRef.current?.focus?.(list[0].coordinates.lat, list[0].coordinates.lng);
+          });
         }
       })
       .catch(() => {
@@ -204,23 +291,57 @@ export default function App() {
     };
   }, [selectedTarget]);
 
-  // Handle crater hotspot selection from search or click
-  const selectCrater = (t: Target) => {
+  // Select any Planetary Target and sweep both globes to corresponding coordinates
+  const selectTargetSite = (t: Target, explicitAnalogId?: string) => {
     setPlanet(t.planet);
     setSelectedTargetId(t.site_id);
+
+    const topAnalog = explicitAnalogId
+      ? Object.values(REAL_SCIENTIFIC_EARTH_ANALOGS).find((a) => a.site_id === explicitAnalogId)
+      : (SITE_ANALOG_MAP[t.site_id]?.[0] || DEFAULT_ANALOGS[0]);
+
+    if (topAnalog) {
+      setSelectedAnalogId(topAnalog.site_id);
+    }
+
     setSearchQuery("");
     setSearchOpen(false);
     setView("dual");
+
+    // Smoothly focus cameras on both globes simultaneously
+    requestAnimationFrame(() => {
+      planetGlobeRef.current?.focus?.(t.coordinates.lat, t.coordinates.lng);
+      if (topAnalog) {
+        earthGlobeRef.current?.focus?.(topAnalog.coordinates.lat, topAnalog.coordinates.lng);
+      }
+    });
   };
 
-  // Handle direct planet selection from rotating triangle
+  // Select an Earth Analog from search results
+  const selectAnalogFromSearch = (analog: (typeof REAL_SCIENTIFIC_EARTH_ANALOGS)[keyof typeof REAL_SCIENTIFIC_EARTH_ANALOGS]) => {
+    let bestTarget: Target | undefined;
+    if (analog.site_id === "real-analog-hawaii") {
+      bestTarget = allTargets.find((t) => t.site_id === "mars-jezero-real") || allTargets.find((t) => t.site_id === "olympus-mons");
+    } else if (analog.site_id === "real-analog-antarctica") {
+      bestTarget = allTargets.find((t) => t.site_id === "moon-shackleton-real") || allTargets.find((t) => t.site_id === "mars-pavonis-tubes-real");
+    } else if (analog.site_id === "real-analog-atacama") {
+      bestTarget = allTargets.find((t) => t.site_id === "gale-crater") || allTargets.find((t) => t.site_id === "valles-marineris");
+    } else if (analog.site_id === "real-analog-svalbard") {
+      bestTarget = allTargets.find((t) => t.site_id === "moon-marius-hills-real") || allTargets.find((t) => t.site_id === "tycho-crater");
+    }
+    const targetToUse = bestTarget || allTargets[0];
+    selectTargetSite(targetToUse, analog.site_id);
+  };
+
+  // Direct planet selection from rotating trinity constellation
   const selectPlanetFromTrinity = (p: Planet) => {
     setPlanet(p);
     const first = allTargets.find((t) => t.planet === p);
     if (first) {
-      setSelectedTargetId(first.site_id);
+      selectTargetSite(first);
+    } else {
+      setView("dual");
     }
-    setView("dual");
   };
 
   return (
@@ -244,7 +365,7 @@ export default function App() {
         <main className="landing">
           <div className="stars" />
           <div className="planet moon" />
-          <div className="planet mars" />
+          <div className="planet earth" />
 
           {/* Top Navbar */}
           <nav className="landing-nav">
@@ -352,7 +473,7 @@ export default function App() {
               <Logo />
             </button>
             <div className="trinity-mission-tag">
-              <span className="mono">ORBITAL CONSTELLATION / EARTH ⟷ MARS ⟷ MOON</span>
+              <span className="mono">ORBITAL CONSTELLATION / EARTH ↔ MARS ↔ MOON</span>
             </div>
             <div className="dash-meta">
               <button className="btn secondary return-btn" onClick={() => setView("landing")}>
@@ -380,12 +501,12 @@ export default function App() {
               <h1>Interplanetary Analog Hub</h1>
               <p>
                 Click <strong>Moon</strong> or <strong>Mars</strong> directly in the rotating constellation, or search
-                any crater below to cinematically pair it with its closest Earth analog.
+                any crater, instrument (LOLA, CRISM, DIVINER), or Earth analog below.
               </p>
             </div>
 
             {/* Central Futuristic Search Bar */}
-            <div className="trinity-search-box-wrap">
+            <div className="trinity-search-box-wrap" ref={searchContainerRef}>
               <div className={`trinity-search-input-box ${searchOpen ? "is-focused" : ""}`}>
                 <span className="search-icon">
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -396,7 +517,7 @@ export default function App() {
                 <input
                   ref={searchInputRef}
                   type="text"
-                  placeholder="Search any crater or hotspot on Moon or Mars (e.g. Jezero, Shackleton, Gale, Olympus)..."
+                  placeholder="Search any crater or site (e.g. Jezero, Shackleton, CRISM, LOLA, Hawaii)..."
                   value={searchQuery}
                   onChange={(e) => {
                     setSearchQuery(e.target.value);
@@ -404,50 +525,134 @@ export default function App() {
                   }}
                   onFocus={() => setSearchOpen(true)}
                 />
-                {searchQuery && (
+                {searchQuery ? (
                   <button className="search-clear-btn" onClick={() => setSearchQuery("")}>
                     ✕
                   </button>
+                ) : (
+                  <span className="search-hotkey-badge">Press /</span>
                 )}
-                <span className="search-hotkey-badge">SELECT CRATER</span>
               </div>
 
               {/* Autocomplete Results Dropdown */}
               {searchOpen && (
-                <div className="trinity-search-dropdown">
+                <div className="trinity-search-dropdown rich-search-dropdown">
                   <div className="dropdown-head">
-                    <span>MATCHING HOTSPOTS ({searchResults.length})</span>
+                    <span>
+                      SEARCH RESULTS ({searchResults.totalCount} SITES AVAILABLE)
+                    </span>
                     <button onClick={() => setSearchOpen(false)}>Close ✕</button>
                   </div>
                   <div className="dropdown-list-scroll">
-                    {searchResults.map((t) => (
-                      <div
-                        key={`${t.planet}-${t.site_id}`}
-                        className={`dropdown-item ${t.planet === "mars" ? "mars-item" : "moon-item"}`}
-                        onClick={() => selectCrater(t)}
-                      >
-                        <div className="dropdown-item-orb">
-                          <span className={`toggle-orb ${t.planet === "mars" ? "mars-orb" : "moon-orb"}`} />
+                    {/* Martian Targets Group */}
+                    {searchResults.mars.length > 0 && (
+                      <div className="search-group-section">
+                        <div className="search-group-title mars-group-title">
+                          <span>🔴 MARTIAN SITES (MOLA, CRISM, THEMIS)</span>
                         </div>
-                        <div className="dropdown-item-info">
-                          <div className="item-title-row">
-                            <strong>{t.site_name}</strong>
-                            <span className={`item-planet-tag ${t.planet === "mars" ? "mars-tag" : "moon-tag"}`}>
-                              {t.planet.toUpperCase()}
-                            </span>
+                        {searchResults.mars.map((t) => (
+                          <div
+                            key={`${t.planet}-${t.site_id}`}
+                            className="dropdown-item mars-item"
+                            onClick={() => selectTargetSite(t)}
+                          >
+                            <div className="dropdown-item-orb">
+                              <span className="toggle-orb mars-orb" />
+                            </div>
+                            <div className="dropdown-item-info">
+                              <div className="item-title-row">
+                                <strong>{t.site_name}</strong>
+                                <span className="item-planet-tag mars-tag">MARS</span>
+                              </div>
+                              <div className="item-details-row">
+                                <span>{formatCoord(t.coordinates.lat, t.coordinates.lng)}</span>
+                                <span className="item-source-badge">{t.data_source}</span>
+                                {t.top_analog_name && (
+                                  <span className="item-analog-link">
+                                    → Matched to <b>{t.top_analog_name.split("(")[0]}</b>
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            <span className="dropdown-item-arrow">→</span>
                           </div>
-                          <div className="item-details-row">
-                            <span>{formatCoord(t.coordinates.lat, t.coordinates.lng)}</span>
-                            <span>{t.primary_rock?.split("&")[0]?.split("/")[0] ?? "Regolith"}</span>
-                            {t.elevation_m != null && <b className="item-elev">{formatNumber(t.elevation_m, "m")}</b>}
-                          </div>
-                        </div>
-                        <span className="dropdown-item-arrow">→</span>
+                        ))}
                       </div>
-                    ))}
-                    {searchResults.length === 0 && (
+                    )}
+
+                    {/* Lunar Targets Group */}
+                    {searchResults.moon.length > 0 && (
+                      <div className="search-group-section">
+                        <div className="search-group-title moon-group-title">
+                          <span>🌑 LUNAR SITES (LOLA, DIVINER, M3)</span>
+                        </div>
+                        {searchResults.moon.map((t) => (
+                          <div
+                            key={`${t.planet}-${t.site_id}`}
+                            className="dropdown-item moon-item"
+                            onClick={() => selectTargetSite(t)}
+                          >
+                            <div className="dropdown-item-orb">
+                              <span className="toggle-orb moon-orb" />
+                            </div>
+                            <div className="dropdown-item-info">
+                              <div className="item-title-row">
+                                <strong>{t.site_name}</strong>
+                                <span className="item-planet-tag moon-tag">MOON</span>
+                              </div>
+                              <div className="item-details-row">
+                                <span>{formatCoord(t.coordinates.lat, t.coordinates.lng)}</span>
+                                <span className="item-source-badge">{t.data_source}</span>
+                                {t.top_analog_name && (
+                                  <span className="item-analog-link">
+                                    → Matched to <b>{t.top_analog_name.split("(")[0]}</b>
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            <span className="dropdown-item-arrow">→</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Earth Terrestrial Analogs Group */}
+                    {searchResults.earth.length > 0 && (
+                      <div className="search-group-section">
+                        <div className="search-group-title earth-group-title">
+                          <span>🌍 EARTH ANALOGS (COPERNICUS DEM, NASA POWER)</span>
+                        </div>
+                        {searchResults.earth.map((a) => (
+                          <div
+                            key={`earth-${a.site_id}`}
+                            className="dropdown-item earth-item"
+                            onClick={() => selectAnalogFromSearch(a)}
+                          >
+                            <div className="dropdown-item-orb">
+                              <span className="toggle-orb earth-orb" />
+                            </div>
+                            <div className="dropdown-item-info">
+                              <div className="item-title-row">
+                                <strong>{a.name}</strong>
+                                <span className="item-planet-tag earth-tag">{a.country.toUpperCase()}</span>
+                              </div>
+                              <div className="item-details-row">
+                                <span>{formatCoord(a.coordinates.lat, a.coordinates.lng)}</span>
+                                <span className="item-source-badge">Copernicus GLO-90 DEM · NASA POWER</span>
+                                <span className="item-analog-link">
+                                  Click to view matching Moon & Mars sites
+                                </span>
+                              </div>
+                            </div>
+                            <span className="dropdown-item-arrow">→</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {searchResults.totalCount === 0 && (
                       <div className="dropdown-empty">
-                        <p>No craters matched "{searchQuery}". Try searching "Jezero", "Shackleton", "Tycho", or "Olympus".</p>
+                        <p>No sites matched "{searchQuery}". Try "Jezero", "Shackleton", "MOLA", "LOLA", "CRISM", or "Hawaii".</p>
                       </div>
                     )}
                   </div>
@@ -456,16 +661,16 @@ export default function App() {
 
               {/* Quick Preset Hotspot Chips */}
               <div className="trinity-preset-chips">
-                <span className="chips-label">QUICK RECON:</span>
-                {allTargets.slice(0, 5).map((t) => (
+                <span className="chips-label">QUICK DATASET SITES:</span>
+                {allTargets.slice(0, 4).map((t) => (
                   <button
                     key={t.site_id}
                     type="button"
                     className={`trinity-chip ${t.planet === "mars" ? "chip-mars" : "chip-moon"}`}
-                    onClick={() => selectCrater(t)}
+                    onClick={() => selectTargetSite(t)}
                   >
-                    <i>{t.planet === "mars" ? "♂" : "🌔"}</i>
-                    <span>{t.site_name}</span>
+                    <i>{t.planet === "mars" ? "♂" : "☽"}</i>
+                    <span>{t.site_name.split("(")[0]}</span>
                   </button>
                 ))}
               </div>
@@ -478,7 +683,7 @@ export default function App() {
                 <div>
                   <small>CELESTIAL RECON</small>
                   <strong>MOON</strong>
-                  <span>{allTargets.filter((t) => t.planet === "moon").length} Crater Hotspots</span>
+                  <span>{allTargets.filter((t) => t.planet === "moon").length} Scientific Hotspots</span>
                 </div>
                 <button className="dest-open-btn">Pair with Earth →</button>
               </div>
@@ -488,7 +693,7 @@ export default function App() {
                 <div>
                   <small>CELESTIAL RECON</small>
                   <strong>MARS</strong>
-                  <span>{allTargets.filter((t) => t.planet === "mars").length} Crater Hotspots</span>
+                  <span>{allTargets.filter((t) => t.planet === "mars").length} Scientific Hotspots</span>
                 </div>
                 <button className="dest-open-btn">Pair with Earth →</button>
               </div>
@@ -513,11 +718,18 @@ export default function App() {
               ⟵ Celestial Trinity
             </button>
 
-            {/* In-Nav Crater Search Input */}
-            <div className="nav-search-wrap">
+            {/* In-Nav Comprehensive Search Bar */}
+            <div className="nav-search-wrap" ref={searchContainerRef}>
+              <span className="nav-search-icon">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+                  <circle cx="11" cy="11" r="8" />
+                  <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                </svg>
+              </span>
               <input
+                ref={searchInputRef}
                 type="text"
-                placeholder="Search any crater..."
+                placeholder="Search any crater, instrument (LOLA, CRISM), or Earth analog..."
                 value={searchQuery}
                 onChange={(e) => {
                   setSearchQuery(e.target.value);
@@ -525,28 +737,128 @@ export default function App() {
                 }}
                 onFocus={() => setSearchOpen(true)}
               />
+              {searchQuery ? (
+                <button className="nav-search-clear-btn" onClick={() => setSearchQuery("")}>
+                  ✕
+                </button>
+              ) : (
+                <kbd className="nav-search-hotkey">/</kbd>
+              )}
+
+              {/* Categorized In-Nav Autocomplete Dropdown */}
               {searchOpen && (
-                <div className="nav-search-dropdown">
-                  {searchResults.slice(0, 6).map((t) => (
-                    <div
-                      key={`${t.planet}-${t.site_id}`}
-                      className="nav-search-item"
-                      onClick={() => selectCrater(t)}
-                    >
-                      <span>{t.planet === "mars" ? "♂" : "🌔"} {t.site_name}</span>
-                      <small>{t.planet.toUpperCase()}</small>
-                    </div>
-                  ))}
+                <div className="nav-search-dropdown-menu">
+                  <div className="dropdown-head">
+                    <span>ALL DATASET SITES ({searchResults.totalCount})</span>
+                    <button onClick={() => setSearchOpen(false)}>Close ✕</button>
+                  </div>
+                  <div className="dropdown-list-scroll">
+                    {/* Martian Sites */}
+                    {searchResults.mars.length > 0 && (
+                      <div className="search-group-section">
+                        <div className="search-group-title mars-group-title">
+                          <span>🔴 MARTIAN TARGETS</span>
+                        </div>
+                        {searchResults.mars.map((t) => (
+                          <div
+                            key={`nav-${t.planet}-${t.site_id}`}
+                            className="nav-search-item"
+                            onClick={() => selectTargetSite(t)}
+                          >
+                            <div className="nav-item-left">
+                              <strong>♂ {t.site_name}</strong>
+                              <small>
+                                {t.data_source} · {formatCoord(t.coordinates.lat, t.coordinates.lng)}
+                              </small>
+                            </div>
+                            <div className="nav-item-right">
+                              {t.top_analog_name && (
+                                <span className="nav-match-badge">
+                                  → {t.top_analog_name.split("(")[0]}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Lunar Sites */}
+                    {searchResults.moon.length > 0 && (
+                      <div className="search-group-section">
+                        <div className="search-group-title moon-group-title">
+                          <span>🌑 LUNAR TARGETS</span>
+                        </div>
+                        {searchResults.moon.map((t) => (
+                          <div
+                            key={`nav-${t.planet}-${t.site_id}`}
+                            className="nav-search-item"
+                            onClick={() => selectTargetSite(t)}
+                          >
+                            <div className="nav-item-left">
+                              <strong>☽ {t.site_name}</strong>
+                              <small>
+                                {t.data_source} · {formatCoord(t.coordinates.lat, t.coordinates.lng)}
+                              </small>
+                            </div>
+                            <div className="nav-item-right">
+                              {t.top_analog_name && (
+                                <span className="nav-match-badge">
+                                  → {t.top_analog_name.split("(")[0]}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Earth Analogs */}
+                    {searchResults.earth.length > 0 && (
+                      <div className="search-group-section">
+                        <div className="search-group-title earth-group-title">
+                          <span>🌍 TERRESTRIAL EARTH ANALOGS</span>
+                        </div>
+                        {searchResults.earth.map((a) => (
+                          <div
+                            key={`nav-earth-${a.site_id}`}
+                            className="nav-search-item"
+                            onClick={() => selectAnalogFromSearch(a)}
+                          >
+                            <div className="nav-item-left">
+                              <strong>🌍 {a.name}</strong>
+                              <small>{a.country} · Copernicus GLO-90 DEM & NASA POWER</small>
+                            </div>
+                            <div className="nav-item-right">
+                              <span className="nav-match-badge earth-badge-match">
+                                View Analog Pair
+                              </span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {searchResults.totalCount === 0 && (
+                      <div className="dropdown-empty">
+                        <p>No sites match "{searchQuery}".</p>
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
 
-            {/* Planet Switcher: Moon ⟷ Mars */}
+            {/* Planet Switcher: Moon ↔ Mars */}
             <div className="planet-toggle-control">
               <button
                 type="button"
                 className={`planet-toggle-btn ${planet === "moon" ? "active moon-active" : ""}`}
-                onClick={() => setPlanet("moon")}
+                onClick={() => {
+                  setPlanet("moon");
+                  const firstMoon = allTargets.find((t) => t.planet === "moon");
+                  if (firstMoon) selectTargetSite(firstMoon);
+                }}
               >
                 <span className="toggle-orb moon-orb" />
                 <span>MOON</span>
@@ -555,7 +867,11 @@ export default function App() {
               <button
                 type="button"
                 className={`planet-toggle-btn ${planet === "mars" ? "active mars-active" : ""}`}
-                onClick={() => setPlanet("mars")}
+                onClick={() => {
+                  setPlanet("mars");
+                  const firstMars = allTargets.find((t) => t.planet === "mars");
+                  if (firstMars) selectTargetSite(firstMars);
+                }}
               >
                 <span className="toggle-orb mars-orb" />
                 <span>MARS</span>
@@ -594,23 +910,43 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Crater selector chips */}
-                <div className="crater-chips-bar">
-                  {planetTargets.map((t) => {
-                    const isActive = t.site_id === selectedTargetId;
-                    return (
-                      <button
-                        key={t.site_id}
-                        type="button"
-                        className={`crater-chip ${isActive ? "is-active" : ""}`}
-                        onClick={() => setSelectedTargetId(t.site_id)}
-                        title={t.site_name}
+                {/* Sleek, Compact Single-Line Target Selector (Replaces overflowing chips) */}
+                <div className="compact-header-controls">
+                  <div className="active-target-selector">
+                    <span className="control-label">HOTSPOT:</span>
+                    <div className="custom-dropdown-wrap">
+                      <select
+                        value={selectedTargetId}
+                        onChange={(e) => {
+                          const t = planetTargets.find((x) => x.site_id === e.target.value);
+                          if (t) selectTargetSite(t);
+                        }}
+                        className="compact-select-input"
                       >
-                        <span>{t.site_name}</span>
-                        {t.elevation_m != null && <small>{Math.round(t.elevation_m)}m</small>}
-                      </button>
-                    );
-                  })}
+                        {planetTargets.map((t) => (
+                          <option key={t.site_id} value={t.site_id}>
+                            {t.site_name} ({t.elevation_m != null ? `${Math.round(t.elevation_m)}m` : "Site"})
+                          </option>
+                        ))}
+                      </select>
+                      <span className="dropdown-caret">▾</span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="compact-search-trigger-btn"
+                    onClick={() => {
+                      searchInputRef.current?.focus();
+                      setSearchOpen(true);
+                    }}
+                    title="Search all sites across Moon and Mars (/)"
+                  >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+                      <circle cx="11" cy="11" r="8" />
+                      <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                    </svg>
+                    <span>All Datasets (/)</span>
+                  </button>
                 </div>
               </div>
 
@@ -621,7 +957,10 @@ export default function App() {
                   planet={planet}
                   targets={planetTargets}
                   selectedId={selectedTargetId}
-                  onSelectTarget={(id) => setSelectedTargetId(id)}
+                  onSelectTarget={(id) => {
+                    const t = allTargets.find((x) => x.site_id === id);
+                    if (t) selectTargetSite(t);
+                  }}
                   autoRotate={autoRotate}
                 />
               </div>
@@ -669,24 +1008,32 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Matched Earth analog candidate selector tabs */}
-                <div className="crater-chips-bar analog-chips-bar">
-                  {analogs.map((a, idx) => {
-                    const isActive = a.site_id === selectedAnalogId;
-                    return (
-                      <button
-                        key={a.site_id}
-                        type="button"
-                        className={`crater-chip analog-chip ${isActive ? "is-active" : ""}`}
-                        onClick={() => setSelectedAnalogId(a.site_id)}
-                        title={`${a.name} (${Math.round(a.similarity_score)}% match)`}
-                      >
-                        <b className="analog-rank">#{idx + 1}</b>
-                        <span>{a.name.split(" ")[0]}</span>
-                        <small>{Math.round(a.similarity_score)}%</small>
-                      </button>
-                    );
-                  })}
+                {/* Sleek, Single-Line Analog Candidate Rank Pills */}
+                <div className="compact-header-controls">
+                  <div className="compact-analog-ranks">
+                    <span className="control-label">CORRESPONDING EARTH SITES:</span>
+                    <div className="rank-pills-row">
+                      {analogs.slice(0, 4).map((a, idx) => {
+                        const isActive = a.site_id === selectedAnalogId;
+                        return (
+                          <button
+                            key={a.site_id}
+                            type="button"
+                            className={`compact-rank-pill ${isActive ? "is-active" : ""}`}
+                            onClick={() => {
+                              setSelectedAnalogId(a.site_id);
+                              earthGlobeRef.current?.focus?.(a.coordinates.lat, a.coordinates.lng);
+                            }}
+                            title={`${a.name} — ${Math.round(a.similarity_score)}% similarity`}
+                          >
+                            <b className="rank-num">#{idx + 1}</b>
+                            <span className="rank-name">{a.name.split(" ")[0]}</span>
+                            <small className="rank-score">{Math.round(a.similarity_score)}%</small>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
                 </div>
               </div>
 
@@ -696,7 +1043,13 @@ export default function App() {
                   ref={earthGlobeRef}
                   analogs={analogs}
                   selectedId={selectedAnalogId}
-                  onSelectAnalog={(id) => setSelectedAnalogId(id)}
+                  onSelectAnalog={(id) => {
+                    setSelectedAnalogId(id);
+                    const a = analogs.find((x) => x.site_id === id);
+                    if (a) {
+                      earthGlobeRef.current?.focus?.(a.coordinates.lat, a.coordinates.lng);
+                    }
+                  }}
                   autoRotate={autoRotate}
                   isSearching={loadingAnalogs}
                 />
@@ -742,133 +1095,134 @@ export default function App() {
                       <small>AVG SLOPE</small>
                       <b>{selectedTarget.avg_slope_deg != null ? `${selectedTarget.avg_slope_deg}°` : "—"}</b>
                     </div>
+                    <div className="tele-metric full-span">
+                      <small>PRIMARY LITHOLOGY</small>
+                      <b>{selectedTarget.primary_rock ?? "Basaltic Regolith"}</b>
+                    </div>
                     <div className="tele-metric">
-                      <small>PRIMARY ROCK</small>
-                      <b>{selectedTarget.primary_rock ?? "Regolith"}</b>
+                      <small>TEMP RANGE</small>
+                      <b>
+                        {selectedTarget.temp_range_c
+                          ? `${selectedTarget.temp_range_c[0]}°C to ${selectedTarget.temp_range_c[1]}°C`
+                          : "—"}
+                      </b>
                     </div>
                     <div className="tele-metric">
                       <small>DATA SOURCE</small>
-                      <b>{selectedTarget.data_source.split("/")[0]}</b>
+                      <b className="mono-sub">{selectedTarget.data_source}</b>
                     </div>
                   </div>
                 </div>
 
-                {/* Column 2: Composite Similarity & Score Breakdown */}
-                <div className="deck-card correlation-card">
+                {/* Column 2: ML Similarity & Multi-Factor Breakdown */}
+                <div className="deck-card scoring-tele-card">
                   <div className="deck-card-top">
-                    <span className="card-badge highlight-badge">COMPOSITE CORRELATION</span>
-                    <div className="score-summary">
-                      <span className="large-score">{Math.round(selectedAnalog.similarity_score)}%</span>
-                      <small>CORRELATION INDEX</small>
+                    <span className="card-badge match-badge">ANALOG MATCH ALGORITHM</span>
+                    <h4>Multi-Factor Convergence</h4>
+                  </div>
+
+                  <div className="big-score-display">
+                    <div className="score-num-wrap">
+                      <span className="score-val">{Math.round(selectedAnalog.similarity_score)}</span>
+                      <span className="score-pct">%</span>
+                    </div>
+                    <div className="score-caption">
+                      <strong>Global Similarity Metric</strong>
+                      <small>Topography · Geochemistry · Climate</small>
                     </div>
                   </div>
 
-                  {/* Score Breakdown Progress Bars */}
-                  <div className="breakdown-stack">
-                    <div className="breakdown-item">
-                      <div className="breakdown-label-row">
-                        <span>Topography Match</span>
+                  {/* Multi-Dimensional Breakdown Bars */}
+                  <div className="breakdown-bars">
+                    <div className="bar-row">
+                      <div className="bar-label">
+                        <span>Topography (DEM)</span>
                         <b>{Math.round(selectedAnalog.breakdown.topography_match)}%</b>
                       </div>
-                      <div className="breakdown-bar">
+                      <div className="progress-track">
                         <div
-                          className="bar-fill topo-bar"
-                          style={{ width: `${Math.round(selectedAnalog.breakdown.topography_match)}%` }}
+                          className="progress-fill topo-fill"
+                          style={{ width: `${selectedAnalog.breakdown.topography_match}%` }}
                         />
                       </div>
                     </div>
 
-                    <div className="breakdown-item">
-                      <div className="breakdown-label-row">
-                        <span>Geochemistry Match</span>
+                    <div className="bar-row">
+                      <div className="bar-label">
+                        <span>Geochemistry (Lithology)</span>
                         <b>{Math.round(selectedAnalog.breakdown.geochemistry_match)}%</b>
                       </div>
-                      <div className="breakdown-bar">
+                      <div className="progress-track">
                         <div
-                          className="bar-fill geochem-bar"
-                          style={{ width: `${Math.round(selectedAnalog.breakdown.geochemistry_match)}%` }}
+                          className="progress-fill geochem-fill"
+                          style={{ width: `${selectedAnalog.breakdown.geochemistry_match}%` }}
                         />
                       </div>
                     </div>
 
-                    <div className="breakdown-item">
-                      <div className="breakdown-label-row">
-                        <span>Climate Match</span>
+                    <div className="bar-row">
+                      <div className="bar-label">
+                        <span>Climate (NASA POWER)</span>
                         <b>{Math.round(selectedAnalog.breakdown.climate_match)}%</b>
                       </div>
-                      <div className="breakdown-bar">
+                      <div className="progress-track">
                         <div
-                          className="bar-fill climate-bar"
-                          style={{ width: `${Math.round(selectedAnalog.breakdown.climate_match)}%` }}
+                          className="progress-fill climate-fill"
+                          style={{ width: `${selectedAnalog.breakdown.climate_match}%` }}
                         />
                       </div>
                     </div>
                   </div>
 
-                  <div className="scientific-rationale-note">
-                    <small>SCIENTIFIC RATIONALE:</small>
-                    <p>{selectedAnalog.rationale ?? "High geochemical and topographical correlation index."}</p>
-                  </div>
+                  <button
+                    type="button"
+                    className="geojson-export-btn"
+                    onClick={() => downloadGeoJson(selectedAnalog, selectedTarget)}
+                  >
+                    <span>Download GeoJSON Layer</span>
+                    <i>⭳</i>
+                  </button>
                 </div>
 
-                {/* Column 3: Earth Analog Telemetry & GeoJSON Export */}
+                {/* Column 3: Earth Analog Telemetry */}
                 <div className="deck-card earth-tele-card">
                   <div className="deck-card-top">
                     <span className="card-badge earth-badge">EARTH ANALOG SPECS</span>
                     <h4>{selectedAnalog.name}</h4>
                   </div>
+                  <p className="deck-description">
+                    {selectedAnalog.rationale ?? "Terrestrial analogue candidate providing field calibration."}
+                  </p>
                   <div className="telemetry-compact-grid">
-                    <div className="tele-metric">
-                      <small>COUNTRY</small>
-                      <b>{selectedAnalog.country}</b>
-                    </div>
                     <div className="tele-metric">
                       <small>ELEVATION</small>
                       <b>{formatNumber(selectedAnalog.metadata.elevation_m, " m")}</b>
                     </div>
                     <div className="tele-metric">
-                      <small>PRIMARY ROCK</small>
-                      <b>{selectedAnalog.metadata.primary_rock ?? "Basalt"}</b>
-                    </div>
-                    <div className="tele-metric">
                       <small>ACCESSIBILITY</small>
                       <b>{selectedAnalog.metadata.accessibility_rating}</b>
                     </div>
-                  </div>
-
-                  <div className="deck-actions">
-                    <button
-                      type="button"
-                      className="geojson-export-btn"
-                      onClick={() => downloadGeoJson(selectedAnalog, selectedTarget)}
-                      title="Export GeoJSON with [lng, lat] coordinate order per GLOBE_PRANJIL.md"
-                    >
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                        <polyline points="7 10 12 15 17 10" />
-                        <line x1="12" y1="15" x2="12" y2="3" />
-                      </svg>
-                      Download GeoJSON [lng, lat]
-                    </button>
+                    <div className="tele-metric full-span">
+                      <small>EARTH LITHOLOGY</small>
+                      <b>{selectedAnalog.metadata.primary_rock ?? "Volcanic Basalt"}</b>
+                    </div>
+                    <div className="tele-metric">
+                      <small>COUNTRY</small>
+                      <b>{selectedAnalog.country}</b>
+                    </div>
+                    <div className="tele-metric">
+                      <small>COORDINATES</small>
+                      <b className="mono-sub">{formatCoord(selectedAnalog.coordinates.lat, selectedAnalog.coordinates.lng)}</b>
+                    </div>
                   </div>
                 </div>
               </div>
             ) : (
               <div className="deck-loading-state">
-                <span className="mono">INITIALIZING TELEMETRY BRIDGE...</span>
+                <span>Calculating correlation vectors between planetary and terrestrial datasets...</span>
               </div>
             )}
           </footer>
-
-          {/* Operational Bottom Strip */}
-          <div className="mission-footer-strip">
-            <span><b>TARGET:</b> {selectedTarget?.site_name ?? planet.toUpperCase()}</span>
-            <span><b>EARTH ANALOG:</b> {selectedAnalog ? `${selectedAnalog.name} (${selectedAnalog.country})` : "—"}</span>
-            <span><b>COORDINATE ORDER:</b> [lng, lat] GeoJSON compliant</span>
-            <span className="footer-status-pill">
-              ASTROTERRAIN API / v1 CONNECTED
-            </span>
-          </div>
         </div>
       )}
     </div>
